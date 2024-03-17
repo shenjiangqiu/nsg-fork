@@ -72,6 +72,7 @@ class IndexNSG : public Index {
 
   private:
     unsigned width;
+    // end point, should be the center point
     unsigned ep_;
     std::vector<std::mutex> locks;
     char* opt_graph_ = nullptr;

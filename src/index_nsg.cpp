@@ -5,10 +5,9 @@
 #include <chrono>
 #include <cmath>
 #include <boost/dynamic_bitset.hpp>
-
+#include <rust-lib.h>
 #include "efanna2e/exceptions.h"
 #include "efanna2e/parameters.h"
-
 namespace efanna2e {
 #define _CONTROL_NUM 100
 IndexNSG::IndexNSG(const size_t dimension, const size_t n, Metric m,
@@ -82,6 +81,20 @@ void IndexNSG::Load_nn_graph(const char *filename) {
     in.read((char *)final_graph_[i].data(), k * sizeof(unsigned));
   }
   in.close();
+  // for(int i=0;i<10;i++){
+  //   for(auto& node : final_graph_[i]){
+  //     std::cout<<node<<" ";
+  //   }
+  //   std::cout<<std::endl;
+  // }
+
+  // for(int i=num-10;i<num;i++){
+  //   for(auto& node : final_graph_[i]){
+  //     std::cout<<node<<" ";
+  //   }
+  //   std::cout<<std::endl;
+  // }
+  // exit(0);
 }
 
 void IndexNSG::get_neighbors(const float *query, const Parameters &parameter,
@@ -162,6 +175,7 @@ void IndexNSG::get_neighbors(const float *query, const Parameters &parameter,
   std::vector<unsigned> init_ids(L);
   // initializer_->Search(query, nullptr, L, parameter, init_ids.data());
 
+  // get L nodes from the neighbor of final_graph_[ep_]
   L = 0;
   for (unsigned i = 0; i < init_ids.size() && i < final_graph_[ep_].size(); i++) {
     init_ids[i] = final_graph_[ep_][i];
@@ -181,6 +195,7 @@ void IndexNSG::get_neighbors(const float *query, const Parameters &parameter,
     unsigned id = init_ids[i];
     if (id >= nd_) continue;
     // std::cout<<id<<std::endl;
+    // the distance from query to id
     float dist = distance_->compare(data_ + dimension_ * (size_t)id, query,
                                     (unsigned)dimension_);
     retset[i] = Neighbor(id, dist, true);
@@ -189,11 +204,12 @@ void IndexNSG::get_neighbors(const float *query, const Parameters &parameter,
     L++;
   }
 
+  // sort by distance from low to high
   std::sort(retset.begin(), retset.begin() + L);
   int k = 0;
   while (k < (int)L) {
     int nk = L;
-
+    // push the node's neighbor into retset
     if (retset[k].flag) {
       retset[k].flag = false;
       unsigned n = retset[k].id;
@@ -214,6 +230,8 @@ void IndexNSG::get_neighbors(const float *query, const Parameters &parameter,
         if (r < nk) nk = r;
       }
     }
+    // after test one node in L, check the next node
+    // every time we insert a smaller node than current node, restart from that node
     if (nk <= k)
       k = nk;
     else
@@ -243,6 +261,7 @@ void IndexNSG::sync_prune(unsigned q, std::vector<Neighbor> &pool,
                           const Parameters &parameter,
                           boost::dynamic_bitset<> &flags,
                           SimpleNeighbor *cut_graph_) {
+                            // pool is the full set
   unsigned range = parameter.Get<unsigned>("R");
   unsigned maxc = parameter.Get<unsigned>("C");
   width = range;
@@ -360,6 +379,14 @@ void IndexNSG::InterInsert(unsigned n, unsigned range,
   }
 }
 
+static void save_pool(unsigned n, std::vector<Neighbor> &pool) {
+  std::ofstream out(std::to_string(n) + ".txt");
+  for (size_t i = 0; i < pool.size(); i++) {
+    out << pool[i].id << " " << pool[i].distance << std::endl;
+  }
+  out.close();
+}
+
 void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_) {
   /*
   std::cout << " graph link" << std::endl;
@@ -381,7 +408,11 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_) {
       pool.clear();
       tmp.clear();
       flags.reset();
+      // from eq to query
       get_neighbors(data_ + dimension_ * n, parameters, flags, tmp, pool);
+      // save the pool
+      
+      save_pool(n,pool);
       sync_prune(n, pool, parameters, flags, cut_graph_);
       /*
     cnt++;
@@ -400,6 +431,8 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_) {
 }
 
 void IndexNSG::Build(size_t n, const float *data, const Parameters &parameters) {
+  info("Building the index");
+
   std::string nn_graph_path = parameters.Get<std::string>("nn_graph_path");
   unsigned range = parameters.Get<unsigned>("R");
   Load_nn_graph(nn_graph_path.c_str());
@@ -436,7 +469,7 @@ void IndexNSG::Build(size_t n, const float *data, const Parameters &parameters) 
   printf("Degree Statistics: Max = %d, Min = %d, Avg = %d\n", max, min, avg);
 
   has_built = true;
-  delete cut_graph_;
+  delete[] cut_graph_;
 }
 
 void IndexNSG::Search(const float *query, const float *x, size_t K,

@@ -45,7 +45,9 @@ class Index {
   inline const float *GetDataset() const { return data_; }
  protected:
   const size_t dimension_;
+  // the raw fvec data
   const float *data_ = nullptr;
+  // the number of nodes
   size_t nd_;
   bool has_built;
   Distance* distance_ = nullptr;
