@@ -1,1 +1,7 @@
 build/
+*.graph
+*.nsg
+*.bin
+build*
+target
+test_result
