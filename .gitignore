@@ -5,3 +5,4 @@ test1
 *.graph
 *.nsg
 *.bin
+test_result

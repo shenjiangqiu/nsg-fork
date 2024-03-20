@@ -1,11 +1,10 @@
 #include "efanna2e/index_nsg.h"
 
-#include <omp.h>
 #include <bitset>
 #include <chrono>
 #include <cmath>
 #include <boost/dynamic_bitset.hpp>
-#include <rust-lib.h>
+#include <rust_lib.h>
 #include "efanna2e/exceptions.h"
 #include "efanna2e/parameters.h"
 namespace efanna2e {
@@ -398,12 +397,10 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_) {
   unsigned range = parameters.Get<unsigned>("R");
   std::vector<std::mutex> locks(nd_);
 
-#pragma omp parallel
   {
     // unsigned cnt = 0;
     std::vector<Neighbor> pool, tmp;
     boost::dynamic_bitset<> flags{nd_, 0};
-#pragma omp for schedule(dynamic, 100)
     for (unsigned n = 0; n < nd_; ++n) {
       pool.clear();
       tmp.clear();
@@ -424,7 +421,6 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_) {
     }
   }
 
-#pragma omp for schedule(dynamic, 100)
   for (unsigned n = 0; n < nd_; ++n) {
     InterInsert(n, range, locks, cut_graph_);
   }

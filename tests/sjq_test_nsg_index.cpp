@@ -4,7 +4,7 @@
 
 #include <efanna2e/index_nsg.h>
 #include <efanna2e/util.h>
-#include <rust-lib.h>
+#include <rust_lib.h>
 void load_data(char *filename, float *&data, unsigned &num,
                unsigned &dim)
 { // load data with sift10K pattern
@@ -45,11 +45,9 @@ void op(unsigned i, std::vector<int> &v)
 int main(int argc, char **argv)
 {
 
-#pragma omp parallel
   {
     std::vector<int> v;
 
-#pragma omp for schedule(dynamic, 100)
     for (int i = 0; i < 10000; i++)
     {
       v.clear();

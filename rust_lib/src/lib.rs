@@ -5,59 +5,53 @@ use std::{
     io::{BufReader, BufWriter},
     path::Path,
 };
+
 pub mod knn_graph;
 use serde::{Deserialize, Serialize};
 use tracing::level_filters::LevelFilter;
 
-#[no_mangle]
+#[cxx::bridge]
+mod ffi {
+    extern "Rust" {
+        type Neighbor;
+        type AnalyzeResult;
+
+        fn rust_lib_helloworld();
+        fn init_logger_info();
+        fn init_logger_debug();
+        fn init_logger_trace();
+        fn info(message: &str);
+
+    }
+}
+
+
 pub extern "C" fn rust_lib_helloworld() {
     println!("Hello, world!");
 }
 
-#[no_mangle]
+
 pub extern "C" fn init_logger_info() {
     init_logger(LevelFilter::INFO);
 }
-#[no_mangle]
+
 pub extern "C" fn init_logger_debug() {
     init_logger(LevelFilter::DEBUG);
 }
-#[no_mangle]
+
 pub extern "C" fn init_logger_trace() {
     init_logger(LevelFilter::TRACE);
 }
 
-#[no_mangle]
-pub extern "C" fn info(message: *const c_char) {
+pub extern "C" fn info(message: &str) {
     log(LevelFilter::INFO, message);
 }
-#[no_mangle]
-pub extern "C" fn debug(message: *const c_char) {
-    log(LevelFilter::DEBUG, message);
-}
-#[no_mangle]
-pub extern "C" fn trace(message: *const c_char) {
-    log(LevelFilter::TRACE, message);
-}
-#[no_mangle]
-pub extern "C" fn error(message: *const c_char) {
-    log(LevelFilter::ERROR, message);
-}
-#[no_mangle]
-pub extern "C" fn warn(message: *const c_char) {
-    log(LevelFilter::WARN, message);
-}
 
-fn log(level: LevelFilter, message: *const c_char) {
-    if message.is_null() {
-        return;
-    }
-    let c_str = unsafe { CStr::from_ptr(message) };
-    let r_str = c_str.to_str().unwrap();
+fn log(level: LevelFilter, message: &str) {
     match level {
-        LevelFilter::INFO => tracing::info!("{}", r_str),
-        LevelFilter::DEBUG => tracing::debug!("{}", r_str),
-        LevelFilter::TRACE => tracing::trace!("{}", r_str),
+        LevelFilter::INFO => tracing::info!("{}", message),
+        LevelFilter::DEBUG => tracing::debug!("{}", message),
+        LevelFilter::TRACE => tracing::trace!("{}", message),
         _ => {}
     }
 }
@@ -124,43 +118,49 @@ pub struct AnalyzeResult {
 fn analyze_by_id(
     neighbors: &Vec<Vec<Neighbor>>,
     ids: impl IntoIterator<Item = usize> + Send + Sync,
+    window_size: usize,
 ) -> AnalyzeResult {
-    use itertools::Itertools;
-    use rayon::prelude::*;
-    let ids: Vec<(_, _)> = ids.into_iter().tuple_windows().collect();
-    let (total_tested, total_shared) = ids
-        .into_par_iter()
-        .map(|(i, j)| {
-            let i: &Vec<Neighbor> = &neighbors[i];
-            let j: &Vec<Neighbor> = &neighbors[j];
-            // assert_eq!(i.len(), j.len());
-            let tested = i.len();
-            let i_set = i
-                .iter()
-                .map(|n| n.id)
-                .collect::<std::collections::BTreeSet<_>>();
-            let j_set = j
-                .iter()
-                .map(|n| n.id)
-                .collect::<std::collections::BTreeSet<_>>();
-            let shared = i_set.intersection(&j_set).count();
-            let shared = shared;
-            (tested, shared)
-        })
-        .reduce(|| (0, 0), |(t1, s1), (t2, s2)| (t1 + t2, s1 + s2));
+    let mut total_tested = 0;
+    let mut total_shared = 0;
+    let mut cache = VecDeque::new();
+    ids.into_iter().for_each(|i| {
+        let i: &Vec<Neighbor> = &neighbors[i];
+        total_tested += i.len();
+        let cache_merged = cache
+            .iter()
+            .fold(std::collections::BTreeSet::new(), |acc, x| {
+                acc.union(x).cloned().collect()
+            });
+        let i_set = i
+            .iter()
+            .map(|n| n.id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let shared = i_set.intersection(&cache_merged).count();
+        total_shared += shared;
+
+        // maintain the cache
+        cache.push_back(i_set);
+        if cache.len() > window_size {
+            cache.pop_front();
+        }
+    });
     AnalyzeResult {
         total_tested,
         total_shared,
     }
 }
 
-pub fn analyze_sequential(neighbors: &Vec<Vec<Neighbor>>) -> AnalyzeResult {
-    analyze_by_id(neighbors, 0..neighbors.len())
+pub fn analyze_sequential(neighbors: &Vec<Vec<Neighbor>>, window_size: usize) -> AnalyzeResult {
+    analyze_by_id(neighbors, 0..neighbors.len(), window_size)
 }
-pub fn analyze_knn_bfs(neighbors: &Vec<Vec<Neighbor>>, knn_graph: &Vec<Vec<u32>>) -> AnalyzeResult {
+pub fn analyze_knn_bfs(
+    neighbors: &Vec<Vec<Neighbor>>,
+    knn_graph: &Vec<Vec<u32>>,
+    window_size: usize,
+) -> AnalyzeResult {
     assert_eq!(neighbors.len(), knn_graph.len());
     let nodes_to_visite = generate_bfs(knn_graph);
-    analyze_by_id(neighbors, nodes_to_visite)
+    analyze_by_id(neighbors, nodes_to_visite, window_size)
 }
 
 pub fn generate_bfs(knn_graph: &Vec<Vec<u32>>) -> Vec<usize> {
@@ -202,10 +202,14 @@ pub fn generate_bfs(knn_graph: &Vec<Vec<u32>>) -> Vec<usize> {
     nodes_to_visite
 }
 //dfs
-pub fn analyze_knn_dfs(neighbors: &Vec<Vec<Neighbor>>, knn_graph: &Vec<Vec<u32>>) -> AnalyzeResult {
+pub fn analyze_knn_dfs(
+    neighbors: &Vec<Vec<Neighbor>>,
+    knn_graph: &Vec<Vec<u32>>,
+    window_size: usize,
+) -> AnalyzeResult {
     assert_eq!(neighbors.len(), knn_graph.len());
     let nodes_to_visite = generate_dfs(knn_graph);
-    analyze_by_id(neighbors, nodes_to_visite)
+    analyze_by_id(neighbors, nodes_to_visite, window_size)
 }
 
 pub fn generate_dfs(knn_graph: &Vec<Vec<u32>>) -> Vec<usize> {
@@ -246,7 +250,7 @@ pub fn generate_dfs(knn_graph: &Vec<Vec<u32>>) -> Vec<usize> {
     nodes_to_visite
 }
 
-#[no_mangle]
+
 pub extern "C" fn run_all() {}
 #[cfg(test)]
 mod tests {
