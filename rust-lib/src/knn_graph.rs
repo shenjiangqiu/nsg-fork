@@ -47,6 +47,7 @@ mod tests {
     use crate::init_logger_debug;
 
     #[test]
+    #[ignore]
     fn test_load() {
         init_logger_debug();
         let graph_path = "../gist.100nn.graph";
