@@ -71,5 +71,6 @@
         "__nullptr": "cpp",
         "__string": "cpp"
     },
-    "git.ignoreLimitWarning": true
+    "git.ignoreLimitWarning": true,
+    "C_Cpp.default.compilerPath": "/usr/bin/g++"
 }

@@ -7,3 +7,5 @@ test1
 *.bin
 test_result
 *.json
+cmake-build-*
+.idea

@@ -403,7 +403,7 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_) {
     // unsigned cnt = 0;
     std::vector<Neighbor> pool, tmp;
     boost::dynamic_bitset<> flags{nd_, 0};
-#pragma omp for schedule(dynamic, 100)
+#pragma omp for schedule(dynamic, 16)
     for (unsigned n = 0; n < nd_; ++n) {
       pool.clear();
       tmp.clear();

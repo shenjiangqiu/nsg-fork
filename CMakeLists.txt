@@ -14,6 +14,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-malloc -fno-builtin-calloc 
 add_definitions (-std=c++11 -O3 -lboost -march=native -Wall -DINFO)
 
 
-add_subdirectory(rust-lib)
+add_subdirectory(rust-crates/rust-lib)
 add_subdirectory(src)
 add_subdirectory(tests)
