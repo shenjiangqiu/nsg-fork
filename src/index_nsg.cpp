@@ -404,7 +404,7 @@ namespace efanna2e {
         std::vector<std::mutex> locks(nd_);
 
         omp_set_num_threads((int)num_threads);
-        
+
         unsigned total_batch = (nd_ + num_threads - 1) / num_threads;
         for (unsigned batch_id = 0; batch_id < total_batch; batch_id++) {
             const unsigned start = batch_id * num_threads;

@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
     efanna2e::IndexNSG index(dim, points_num, efanna2e::L2, nullptr);
     auto traversal_sequence = build_traversal_seqence(nn_graph_path.c_str());
     index.Load_nn_graph(nn_graph_path.c_str());
-    for (unsigned threads = 4; threads <= 64; threads += 4) {
+    for (unsigned threads = 64; threads >= 4; threads -= 4) {
         for (unsigned traversal_idx = 0; traversal_idx < NUM_TRAVERSAL; traversal_idx++) {
             std::cout << "running for " << traversal_idx << " threads: " << threads << std::endl;
             const unsigned long *trace = traversal_sequence[traversal_idx];
