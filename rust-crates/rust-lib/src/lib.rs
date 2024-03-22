@@ -15,9 +15,46 @@ pub mod bfs;
 pub mod cabdfs;
 pub mod dfs;
 
+pub const NUM_TRAVERSAL: usize = 8;
 #[no_mangle]
 pub extern "C" fn rust_lib_helloworld() {
     println!("Hello, world!");
+}
+
+#[no_mangle]
+pub extern "C" fn build_traversal_seqence(name: *const c_char) -> *const *const usize {
+    use knn_graph::IndexNSG;
+    let c_str = unsafe { CStr::from_ptr(name) };
+    let mut index_nsg = IndexNSG::new();
+    let file_name = Path::new(c_str.to_str().unwrap());
+    index_nsg.load_nn_graph(file_name).unwrap();
+    let sequenctial = (0..index_nsg.final_graph_.len()).collect::<Vec<_>>();
+    let bfs: Vec<usize> = bfs::generate_bfs(&index_nsg.final_graph_);
+    let dfs = dfs::generate_dfs(&index_nsg.final_graph_);
+    let bdfs_4 = bdfs::generate_bdfs(&index_nsg.final_graph_, 4);
+    let bdfs_8 = bdfs::generate_bdfs(&index_nsg.final_graph_, 8);
+    let bdfs_16 = bdfs::generate_bdfs(&index_nsg.final_graph_, 16);
+    let bdfs_32 = bdfs::generate_bdfs(&index_nsg.final_graph_, 32);
+    let bdfs_64 = bdfs::generate_bdfs(&index_nsg.final_graph_, 64);
+    let ret: Box<[*mut [usize]; NUM_TRAVERSAL]> = Box::new([
+        Box::into_raw(sequenctial.into_boxed_slice()),
+        Box::into_raw(bfs.into_boxed_slice()),
+        Box::into_raw(dfs.into_boxed_slice()),
+        Box::into_raw(bdfs_4.into_boxed_slice()),
+        Box::into_raw(bdfs_8.into_boxed_slice()),
+        Box::into_raw(bdfs_16.into_boxed_slice()),
+        Box::into_raw(bdfs_32.into_boxed_slice()),
+        Box::into_raw(bdfs_64.into_boxed_slice()),
+    ]);
+    Box::into_raw(ret) as *const *const usize
+}
+
+#[no_mangle]
+pub extern "C" fn release_traversal_sequence(ptr: *const *const usize) {
+    let boxed = unsafe { Box::from_raw(ptr as *mut [*mut [usize]; NUM_TRAVERSAL]) };
+    for i in 0..NUM_TRAVERSAL {
+        let _ = unsafe { Box::from_raw(boxed[i]) };
+    }
 }
 
 #[no_mangle]

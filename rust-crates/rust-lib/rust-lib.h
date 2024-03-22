@@ -5,9 +5,13 @@
 #include <stdlib.h>
 
 
+#define NUM_TRAVERSAL 8
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
+
+const size_t *const *build_traversal_seqence(const char *name);
 
 void debug(const char *message);
 
@@ -21,7 +25,7 @@ void init_logger_info(void);
 
 void init_logger_trace(void);
 
-void run_all(void);
+void release_traversal_sequence(const size_t *const *ptr);
 
 void rust_lib_helloworld(void);
 
