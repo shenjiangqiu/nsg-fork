@@ -403,8 +403,8 @@ namespace efanna2e {
         unsigned num_threads = parameters.Get<unsigned>("Threads");
         std::vector<std::mutex> locks(nd_);
 
-
-
+        omp_set_num_threads((int)num_threads);
+        
         unsigned total_batch = (nd_ + num_threads - 1) / num_threads;
         for (unsigned batch_id = 0; batch_id < total_batch; batch_id++) {
             const unsigned start = batch_id * num_threads;
@@ -417,7 +417,7 @@ namespace efanna2e {
                 // unsigned cnt = 0;
                 std::vector<Neighbor> pool, tmp;
                 boost::dynamic_bitset<> flags{nd_, 0};
-#pragma omp for schedule(static, num_threads)
+#pragma omp for schedule(static)
                 for (unsigned n = start; n < end; ++n) {
                     unsigned n_index = traversal_sequence[n];
                     pool.clear();
@@ -447,7 +447,7 @@ namespace efanna2e {
             if (end > nd_) {
                 end = nd_;
             }
-#pragma omp for schedule(static, num_threads)
+#pragma omp for schedule(static)
             for (unsigned n = start; n < end; ++n) {
                 unsigned n_index = traversal_sequence[n];
                 InterInsert(n_index, range, locks, cut_graph_);
