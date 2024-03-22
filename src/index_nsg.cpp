@@ -446,7 +446,7 @@ namespace efanna2e {
             if (end > nd_) {
                 end = nd_;
             }
-#pragma omp for schedule(dynamic, num_threads)
+#pragma omp for schedule(static, num_threads)
             for (unsigned n = start; n < end; ++n) {
                 unsigned n_index = traversal_sequence[n];
                 InterInsert(n_index, range, locks, cut_graph_);
@@ -457,42 +457,42 @@ namespace efanna2e {
     void IndexNSG::Build(size_t n, const float *data, const Parameters &parameters,
                          const unsigned long *traversal_sequence) {
         info("Building the index");
-        std::string nn_graph_path = parameters.Get<std::string>("nn_graph_path");
         unsigned range = parameters.Get<unsigned>("R");
-        Load_nn_graph(nn_graph_path.c_str());
+
         data_ = data;
         init_graph(parameters);
         SimpleNeighbor *cut_graph_ = new SimpleNeighbor[nd_ * (size_t) range];
         Link(parameters, cut_graph_, traversal_sequence);
-        final_graph_.resize(nd_);
 
-        for (size_t i = 0; i < nd_; i++) {
-            SimpleNeighbor *pool = cut_graph_ + i * (size_t) range;
-            unsigned pool_size = 0;
-            for (unsigned j = 0; j < range; j++) {
-                if (pool[j].distance == -1) break;
-                pool_size = j;
-            }
-            pool_size++;
-            final_graph_[i].resize(pool_size);
-            for (unsigned j = 0; j < pool_size; j++) {
-                final_graph_[i][j] = pool[j].id;
-            }
-        }
+//        final_graph_.resize(nd_);
+//
+//        for (size_t i = 0; i < nd_; i++) {
+//            SimpleNeighbor *pool = cut_graph_ + i * (size_t) range;
+//            unsigned pool_size = 0;
+//            for (unsigned j = 0; j < range; j++) {
+//                if (pool[j].distance == -1) break;
+//                pool_size = j;
+//            }
+//            pool_size++;
+//            final_graph_[i].resize(pool_size);
+//            for (unsigned j = 0; j < pool_size; j++) {
+//                final_graph_[i][j] = pool[j].id;
+//            }
+//        }
 
-        tree_grow(parameters);
+//        tree_grow(parameters);
 
-        unsigned max = 0, min = 1e6, avg = 0;
-        for (size_t i = 0; i < nd_; i++) {
-            auto size = final_graph_[i].size();
-            max = max < size ? size : max;
-            min = min > size ? size : min;
-            avg += size;
-        }
-        avg /= 1.0 * nd_;
-        printf("Degree Statistics: Max = %d, Min = %d, Avg = %d\n", max, min, avg);
-
-        has_built = true;
+//        unsigned max = 0, min = 1e6, avg = 0;
+//        for (size_t i = 0; i < nd_; i++) {
+//            auto size = final_graph_[i].size();
+//            max = max < size ? size : max;
+//            min = min > size ? size : min;
+//            avg += size;
+//        }
+//        avg /= 1.0 * nd_;
+//        printf("Degree Statistics: Max = %d, Min = %d, Avg = %d\n", max, min, avg);
+//
+//        has_built = true;
         delete[] cut_graph_;
     }
 

@@ -42,22 +42,23 @@ int main(int argc, char **argv) {
     unsigned L = (unsigned) atoi(argv[3]);
     unsigned R = (unsigned) atoi(argv[4]);
     unsigned C = (unsigned) atoi(argv[5]);
-
+    efanna2e::Parameters paras;
+    paras.Set<unsigned>("L", L);
+    paras.Set<unsigned>("R", R);
+    paras.Set<unsigned>("C", C);
+    paras.Set<std::string>("nn_graph_path", nn_graph_path);
     // data_load = efanna2e::data_align(data_load, points_num, dim);//one must
     // align the data before build
     efanna2e::IndexNSG index(dim, points_num, efanna2e::L2, nullptr);
     auto traversal_sequence = build_traversal_seqence(nn_graph_path.c_str());
-    for (unsigned threads = 4; threads < 64; threads += 4) {
+    index.Load_nn_graph(nn_graph_path.c_str());
+    for (unsigned threads = 4; threads <= 64; threads += 4) {
         for (unsigned traversal_idx = 0; traversal_idx < NUM_TRAVERSAL; traversal_idx++) {
             std::cout << "running for " << traversal_idx << " threads: " << threads << std::endl;
             const unsigned long *trace = traversal_sequence[traversal_idx];
             auto s = std::chrono::high_resolution_clock::now();
-            efanna2e::Parameters paras;
-            paras.Set<unsigned>("L", L);
-            paras.Set<unsigned>("R", R);
-            paras.Set<unsigned>("C", C);
+
             paras.Set<unsigned>("Treads", threads);
-            paras.Set<std::string>("nn_graph_path", nn_graph_path);
 
             index.Build(points_num, data_load, paras, trace);
             auto e = std::chrono::high_resolution_clock::now();
@@ -69,7 +70,7 @@ int main(int argc, char **argv) {
 
 
 
-//  index.Save(argv[6]);
+  index.Save(argv[6]);
 
     return 0;
 }

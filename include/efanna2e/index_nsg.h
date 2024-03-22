@@ -39,6 +39,7 @@ class IndexNSG : public Index {
       const Parameters &parameters,
       unsigned *indices);
   void OptimizeGraph(float* data);
+    void Load_nn_graph(const char *filename);
 
   protected:
     typedef std::vector<std::vector<unsigned > > CompactGraph;
@@ -64,7 +65,6 @@ class IndexNSG : public Index {
     void InterInsert(unsigned n, unsigned range, std::vector<std::mutex>& locks, SimpleNeighbor* cut_graph_);
     void sync_prune(unsigned q, std::vector<Neighbor>& pool, const Parameters &parameter, boost::dynamic_bitset<>& flags, SimpleNeighbor* cut_graph_);
     void Link(const Parameters &parameters, SimpleNeighbor* cut_graph_ ,const unsigned long * traversal_sequence);
-    void Load_nn_graph(const char *filename);
     void tree_grow(const Parameters &parameter);
     void DFS(boost::dynamic_bitset<> &flag, unsigned root, unsigned &cnt);
     void findroot(boost::dynamic_bitset<> &flag, unsigned &root, const Parameters &parameter);
