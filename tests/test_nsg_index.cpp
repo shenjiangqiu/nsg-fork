@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
             const unsigned long *trace = traversal_sequence[traversal_idx];
             auto s = std::chrono::high_resolution_clock::now();
 
-            paras.Set<unsigned>("Treads", threads);
+            paras.Set<unsigned>("Threads", threads);
 
             index.Build(points_num, data_load, paras, trace);
             auto e = std::chrono::high_resolution_clock::now();
