@@ -11,6 +11,16 @@ pub struct KnnGraph {
 }
 
 impl KnnGraph {
+    pub fn new(final_graph: Vec<Vec<u32>>) -> Self {
+        let k = final_graph[0].len();
+        let num = final_graph.len();
+        assert!(final_graph.iter().all(|x| x.len() == k));
+        Self {
+            final_graph,
+            num,
+            k,
+        }
+    }
     pub fn from_file(filename: &Path) -> Self {
         let mut final_graph = vec![];
         let mut file = File::open(filename).unwrap();

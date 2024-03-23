@@ -10,3 +10,4 @@ test_result
 cmake-build-*
 .idea
 gist*
+*build

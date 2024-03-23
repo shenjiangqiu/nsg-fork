@@ -21,6 +21,15 @@ enum Commands {
         l: usize,
         c: usize,
         knn_graph: PathBuf,
+        f_vec_path: PathBuf,
+        result_graph: PathBuf,
+    },
+    BuildIndexAsync {
+        r: usize,
+        l: usize,
+        c: usize,
+        knn_graph: PathBuf,
+        f_vec_path: PathBuf,
         result_graph: PathBuf,
     },
     /// translate the txt trace into bin
@@ -43,8 +52,17 @@ fn main() {
             l,
             c,
             knn_graph,
+            f_vec_path,
             result_graph,
-        } => rust_lib::build_index(r, l, c, &knn_graph, &result_graph),
+        } => rust_lib::bench_build_index_sync(r, l, c, &knn_graph, &f_vec_path, &result_graph),
+        Commands::BuildIndexAsync {
+            r,
+            l,
+            c,
+            knn_graph,
+            f_vec_path,
+            result_graph,
+        } => rust_lib::bench_build_index_async(r, l, c, &knn_graph, &f_vec_path, &result_graph),
     }
 }
 fn parse_result(start: usize, end: usize) {
@@ -56,7 +74,7 @@ fn parse_result(start: usize, end: usize) {
         let bfs_result: AnalyzeResult = serde_json::from_reader(File::open(bfs).unwrap()).unwrap();
         let dfs_result: AnalyzeResult = serde_json::from_reader(File::open(dfs).unwrap()).unwrap();
         println!(
-            "missrate:{}: seq: {} bfs: {} dfs: {}",
+            "missrate: {} :seq: {} bfs: {} dfs: {}",
             i,
             1. - seq_result.total_shared as f32 / seq_result.total_tested as f32,
             1. - bfs_result.total_shared as f32 / bfs_result.total_tested as f32,

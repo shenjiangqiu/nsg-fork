@@ -528,6 +528,7 @@ dependencies = [
  "rand",
  "rayon",
  "serde",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]

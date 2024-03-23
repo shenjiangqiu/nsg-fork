@@ -1,5 +1,9 @@
+use std::cell::RefCell;
+
 use bitvec::{bitvec, vec::BitVec};
+use itertools::Itertools;
 use rand::Rng;
+use tracing::{debug, info};
 
 use crate::{
     distance::{DistanceTrait, L2Distance},
@@ -19,6 +23,7 @@ pub struct IndexNsg<'a, 'b> {
 
 impl<'a, 'b> IndexNsg<'a, 'b> {
     pub fn new(knn_graph: &'a KnnGraph, fvec: &'b Fvec, l: usize, r: usize, c: usize) -> Self {
+        assert_eq!(fvec.num, knn_graph.num);
         Self {
             knn_graph,
             fvec,
@@ -28,40 +33,132 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
         }
     }
 
+    pub fn build_async(
+        &self,
+        traversal_ordering: &[u32],
+        cut_graph: &mut Vec<SimpleNeighbor>,
+        center_point_id: u32,
+    ) {
+        use rayon::prelude::*;
+        // let current_threads = rayon::current_num_threads();
+        let cut_graph = cut_graph.chunks_mut(self.r);
+        let tasks = cut_graph.into_iter().zip(traversal_ordering);
+        thread_local! {
+            static STORE: RefCell<Option<(Vec<Neighbor>,Vec<Neighbor>,BitVec)>> = RefCell::new(None);
+        };
+        tasks
+            .into_iter()
+            .enumerate()
+            .par_bridge()
+            .for_each(|(index, (cut, node_id))| {
+                STORE.with(|data| {
+                    let mut data = data.borrow_mut();
+                    if data.is_none() {
+                        info!("init data");
+                        *data = Some((
+                            Vec::with_capacity(4096),
+                            Vec::with_capacity(self.l + 1),
+                            BitVec::with_capacity(self.knn_graph.num),
+                        ));
+                    }
+                    let (full_set, ret_set, flags) = data.as_mut().unwrap();
+                    full_set.clear();
+                    ret_set.clear();
+                    flags.clear();
+                    flags.resize(self.knn_graph.num, false);
+
+                    debug!("start running : {}, {}", node_id, index);
+                    self.get_neighbors(
+                        center_point_id as usize,
+                        self.fvec.get_node(*node_id as usize),
+                        full_set,
+                        ret_set,
+                        flags,
+                        self.l,
+                    );
+                    debug!("full_set: {:?}", full_set);
+                    debug!("ret_set: {:?}", ret_set);
+                    debug!("flags: {:?}", flags);
+                    self.sync_prune(*node_id, full_set, flags, cut);
+                    debug!("cut: {:?}", cut);
+                    debug!("flags: {:?}", flags);
+                    debug!("full_set: {:?}", full_set);
+                    debug!("finished running: {}, {}", node_id, index);
+                });
+            });
+    }
+
     pub fn build(
         &self,
         traversal_ordering: &[u32],
         cut_graph: &mut Vec<SimpleNeighbor>,
         center_point_id: u32,
     ) {
-        for (index, node_id) in traversal_ordering.iter().enumerate() {
-            let mut full_set = vec![];
-            let mut ret_set = vec![];
-            let mut flags = bitvec!(0; self.knn_graph.num);
-            self.get_neighbors(
-                center_point_id as usize,
-                self.fvec.get_node(*node_id as usize),
-                &mut full_set,
-                &mut ret_set,
-                &mut flags,
-                self.l,
-            );
-            self.sync_prune(*node_id, index, &mut full_set, &mut flags, cut_graph);
+        use rayon::prelude::*;
+        let current_threads = rayon::current_num_threads();
+        let cut_chunk = cut_graph.chunks_mut(self.r).chunks(current_threads);
+        let thread_chunk_ordering = traversal_ordering.chunks(current_threads);
+        let tasks = cut_chunk.into_iter().zip(thread_chunk_ordering);
+        thread_local! {
+            static STORE: RefCell<Option<(Vec<Neighbor>,Vec<Neighbor>,BitVec)>> = RefCell::new(None);
+        };
+        for (chunk_idx, (cut, order)) in tasks.into_iter().enumerate() {
+            let cut = cut.collect::<Vec<_>>();
+            cut.into_par_iter()
+                .zip(order)
+                .enumerate()
+                .for_each(|(index, (cut, node_id))| {
+                    STORE.with(|data| {
+                        let mut data = data.borrow_mut();
+                        if data.is_none() {
+                            info!("init data");
+                            *data = Some((
+                                Vec::with_capacity(4096),
+                                Vec::with_capacity(self.l + 1),
+                                BitVec::with_capacity(self.knn_graph.num),
+                            ));
+                        }
+                        let (full_set, ret_set, flags) = data.as_mut().unwrap();
+                        full_set.clear();
+                        ret_set.clear();
+                        flags.clear();
+                        flags.resize(self.knn_graph.num, false);
+
+                        debug!("start running : {}, {}:{}", node_id, chunk_idx, index);
+                        self.get_neighbors(
+                            center_point_id as usize,
+                            self.fvec.get_node(*node_id as usize),
+                            full_set,
+                            ret_set,
+                            flags,
+                            self.l,
+                        );
+                        debug!("full_set: {:?}", full_set);
+                        debug!("ret_set: {:?}", ret_set);
+                        debug!("flags: {:?}", flags);
+                        self.sync_prune(*node_id, full_set, flags, cut);
+                        debug!("cut: {:?}", cut);
+                        debug!("flags: {:?}", flags);
+                        debug!("full_set: {:?}", full_set);
+
+                        debug!("finished running: {}, {}:{}", node_id, chunk_idx, index);
+                    });
+                });
         }
     }
     pub fn sync_prune(
         &self,
         query: u32,
-        index: usize,
         full_set: &mut Vec<Neighbor>,
         flags: &mut BitVec,
-        cut_graph: &mut Vec<SimpleNeighbor>,
+        cut: &mut [SimpleNeighbor],
     ) {
         for q_neigher in &self.knn_graph.final_graph[query as usize] {
             // put it into pool
             if flags[*q_neigher as usize] {
                 continue;
             }
+            flags.set(*q_neigher as usize, true);
             let left_f = self.fvec.get_node(*q_neigher as usize);
             let distance = L2Distance::distance(left_f, self.fvec.get_node(query as usize));
             full_set.push(Neighbor {
@@ -100,8 +197,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                 result.push(*p);
             }
         }
-        let simple_neighbers = &mut cut_graph[index * self.r..(index + 1) * self.r];
-        for (result_neighber, simple_neighbor) in result.into_iter().zip(simple_neighbers) {
+        for (result_neighber, simple_neighbor) in result.into_iter().zip(cut) {
             simple_neighbor.id = result_neighber.id;
             simple_neighbor.distance = result_neighber.distance;
         }
@@ -168,19 +264,21 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                 flag: true,
             });
         }
-        full_set.sort_by(|x, y| x.distance.total_cmp(&y.distance));
+        ret_set.sort_by(|x, y| x.distance.total_cmp(&y.distance));
 
         let mut k = 0;
         while k < l {
             // new_k, the new k for next step, will be set if a new neighor inserted into the retset
             let mut nk = l;
             // test k's neighbor, add them into retset
+            debug!("adding neighbors for k: {}, node_id: {}", k, ret_set[k].id);
             if ret_set[k].flag {
                 ret_set[k].flag = false;
                 for neigber in self.knn_graph.final_graph[ret_set[k].id as usize].iter() {
                     if flags[*neigber as usize] {
                         continue;
                     }
+                    flags.set(*neigber as usize, true);
                     let left_f = self.fvec.get_node(*neigber as usize);
                     let distance = L2Distance::distance(target_node, left_f);
                     full_set.push(Neighbor {
@@ -199,6 +297,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                 }
             }
             if nk <= k {
+                debug!("nk: {}, k: {}", nk, k);
                 k = nk;
             } else {
                 k += 1;
@@ -252,7 +351,14 @@ pub fn binary_search_insert(ret_set: &mut Vec<Neighbor>, id: u32, distance: f32)
 
 #[cfg(test)]
 mod tests {
+
+    use std::{thread::sleep, time::Duration};
+
+    use rayon::ThreadPoolBuilder;
+
     use super::*;
+    use crate::init_logger_debug;
+    use tracing::info;
     #[test]
     fn test_binary_insert() {
         let mut sorted_array = vec![
@@ -337,5 +443,86 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn test_rayon() {
+        use rayon::prelude::*;
+        let mut vec_data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        vec_data.par_iter_mut().for_each(|x| {
+            *x += 1;
+        });
+        assert_eq!(vec_data, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            vec_data.par_iter_mut().for_each(|x| {
+                *x += 1;
+                println!("{:?}", x);
+                sleep(Duration::from_secs(1));
+            });
+        });
+
+        vec_data.chunks_mut(2).for_each(|chunk| {
+            pool.install(|| {
+                chunk.par_iter_mut().for_each(|x| {
+                    *x += 1;
+                    println!("{:?}", x);
+                    sleep(Duration::from_secs(1));
+                });
+            });
+        });
+
+        pool.install(|| {
+            vec_data.iter_mut().par_bridge().for_each(|x| {
+                *x += 1;
+                println!("{:?}", x);
+                sleep(Duration::from_secs(1));
+            });
+        });
+    }
+
+    fn build_final_graph() -> Vec<Vec<u32>> {
+        let mut final_graph = vec![];
+        final_graph.push(vec![0, 1]);
+        for i in 1..15 {
+            let mut neighbors = vec![];
+            neighbors.push(i - 1);
+            neighbors.push(i + 1);
+            final_graph.push(neighbors);
+        }
+        final_graph.push(vec![14, 15]);
+        final_graph
+    }
+    fn build_data() -> Vec<f32> {
+        let mut data = vec![];
+        for i in 0..16 {
+            for _j in 0..16 {
+                data.push((i * i + 1) as f32);
+            }
+        }
+        data
+    }
+    #[test]
+    fn test_index_nsg() {
+        init_logger_debug();
+        let final_graph = build_final_graph();
+        let knn_graph = KnnGraph::new(final_graph);
+
+        let data = build_data();
+        let f_vec = Fvec::new(16, 16, data);
+        let index_nsg = IndexNsg::new(&knn_graph, &f_vec, 2, 2, 4);
+        let center_point = index_nsg.build_center_point();
+        info!("center: {:?}", center_point);
+        let traversal_ordering = (0u32..knn_graph.num as u32).collect_vec();
+        let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * 2];
+        let thread_pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
+        thread_pool.install(|| {
+            index_nsg.build(&traversal_ordering, &mut cut_graph, center_point);
+        });
+        info!("{:?}", cut_graph.len());
+        info!("{:?}", cut_graph);
     }
 }

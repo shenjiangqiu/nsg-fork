@@ -13,6 +13,10 @@ pub struct Fvec {
 }
 
 impl Fvec {
+    pub fn new(dim: usize, num: usize, data: Vec<f32>) -> Self {
+        assert_eq!(data.len(), dim * num);
+        Self { data, dim, num }
+    }
     pub fn from_file(file_path: &Path) -> Self {
         let mut data = vec![];
         let mut file = File::open(file_path).unwrap();
@@ -56,7 +60,7 @@ impl Fvec {
         }
         center
     }
-    pub fn get_node(&self,node_id:usize) -> &[f32] {
+    pub fn get_node(&self, node_id: usize) -> &[f32] {
         &self.data[node_id * self.dim..(node_id + 1) * self.dim]
     }
 }
