@@ -1,6 +1,9 @@
 use clap::{Parser, Subcommand};
 use rust_lib::{init_logger_info, AnalyzeResult};
-use std::{fs::File, path::Path};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
 use tracing::info;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -12,6 +15,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// build the nsg index from knn graph
+    BuildIndex {
+        r: usize,
+        l: usize,
+        c: usize,
+        knn_graph: PathBuf,
+        result_graph: PathBuf,
+    },
     /// translate the txt trace into bin
     Translate,
     /// analyze the trace
@@ -27,6 +38,13 @@ fn main() {
         Commands::Translate => translate(),
         Commands::Analyze { start, end } => analyze(start, end),
         Commands::ParseResult { start, end } => parse_result(start, end),
+        Commands::BuildIndex {
+            r,
+            l,
+            c,
+            knn_graph,
+            result_graph,
+        } => rust_lib::build_index(r, l, c, &knn_graph, &result_graph),
     }
 }
 fn parse_result(start: usize, end: usize) {
@@ -49,9 +67,8 @@ fn parse_result(start: usize, end: usize) {
 fn analyze(start: usize, end: usize) {
     let nsg_trace_path = Path::new("neighbors.bin");
     let knn_path = Path::new("gist.100nn.graph");
-    let mut knn_graph = rust_lib::knn_graph::IndexNSG::new();
+    let knn_graph = rust_lib::knn_graph::KnnGraph::from_file(knn_path);
     info!("Loading knn graph");
-    knn_graph.load_nn_graph(knn_path).unwrap();
     info!("Loading neighbors");
     let neighbors = rust_lib::read_bin(nsg_trace_path);
     use rayon::prelude::*;
@@ -59,9 +76,9 @@ fn analyze(start: usize, end: usize) {
         info!("Analyzing sequence {}", i);
         let sequential_result = rust_lib::analyze_sequential(&neighbors, i);
         info!("Analyzing bfs");
-        let bfs_result = rust_lib::analyze_knn_bfs(&neighbors, &knn_graph.final_graph_, i);
+        let bfs_result = rust_lib::analyze_knn_bfs(&neighbors, &knn_graph.final_graph, i);
         info!("Analyzing dfs");
-        let dfs_result = rust_lib::analyze_knn_dfs(&neighbors, &knn_graph.final_graph_, i);
+        let dfs_result = rust_lib::analyze_knn_dfs(&neighbors, &knn_graph.final_graph, i);
         let sequential_file = format!("./s{i}-seq.json");
         serde_json::to_writer(File::create(sequential_file).unwrap(), &sequential_result).unwrap();
         let bfs_file = format!("./s{i}-bfs.json");
@@ -71,7 +88,7 @@ fn analyze(start: usize, end: usize) {
         (4..32).into_par_iter().for_each(|max_depth| {
             info!("Analyzing bdfs with max depth {}", max_depth);
             let bfs_result =
-                rust_lib::analyze_knn_bdfs(&neighbors, &knn_graph.final_graph_, i, max_depth);
+                rust_lib::analyze_knn_bdfs(&neighbors, &knn_graph.final_graph, i, max_depth);
             let bfs_file = format!("./s{i}-bdfs-{max_depth}.json");
             serde_json::to_writer(File::create(bfs_file).unwrap(), &bfs_result).unwrap();
         });

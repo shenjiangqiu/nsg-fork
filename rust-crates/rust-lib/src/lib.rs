@@ -2,10 +2,12 @@ use std::{
     collections::VecDeque,
     ffi::{c_char, CStr},
     fs::File,
+    hint::black_box,
     io::{BufReader, BufWriter},
     path::Path,
 };
 pub mod knn_graph;
+use nsg_index::IndexNsg;
 use serde::{Deserialize, Serialize};
 use tracing::level_filters::LevelFilter;
 
@@ -14,8 +16,22 @@ pub mod bdfs;
 pub mod bfs;
 pub mod cabdfs;
 pub mod dfs;
-
+pub mod distance;
+pub mod fvec;
+pub mod nsg_index;
 pub const NUM_TRAVERSAL: usize = 8;
+
+pub fn build_index(r: usize, l: usize, c: usize, knn_path: &Path, result_path: &Path) {
+    let knn_graph = knn_graph::KnnGraph::from_file(knn_path);
+    let fvec = fvec::Fvec::from_file(result_path);
+    let index_nsg = IndexNsg::new(&knn_graph, &fvec, l, r, c);
+    let center_point_id = index_nsg.build_center_point();
+    let traversal_ordering = (0u32..knn_graph.num as u32).collect::<Vec<_>>();
+    let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * r];
+    index_nsg.build(&traversal_ordering, &mut cut_graph, center_point_id);
+    black_box(cut_graph);
+}
+
 #[no_mangle]
 pub extern "C" fn rust_lib_helloworld() {
     println!("Hello, world!");
@@ -23,19 +39,18 @@ pub extern "C" fn rust_lib_helloworld() {
 
 #[no_mangle]
 pub extern "C" fn build_traversal_seqence(name: *const c_char) -> *const *const usize {
-    use knn_graph::IndexNSG;
+    use knn_graph::KnnGraph;
     let c_str = unsafe { CStr::from_ptr(name) };
-    let mut index_nsg = IndexNSG::new();
     let file_name = Path::new(c_str.to_str().unwrap());
-    index_nsg.load_nn_graph(file_name).unwrap();
-    let sequenctial = (0..index_nsg.final_graph_.len()).collect::<Vec<_>>();
-    let bfs: Vec<usize> = bfs::generate_bfs(&index_nsg.final_graph_);
-    let dfs = dfs::generate_dfs(&index_nsg.final_graph_);
-    let bdfs_4 = bdfs::generate_bdfs(&index_nsg.final_graph_, 4);
-    let bdfs_8 = bdfs::generate_bdfs(&index_nsg.final_graph_, 8);
-    let bdfs_16 = bdfs::generate_bdfs(&index_nsg.final_graph_, 16);
-    let bdfs_32 = bdfs::generate_bdfs(&index_nsg.final_graph_, 32);
-    let bdfs_64 = bdfs::generate_bdfs(&index_nsg.final_graph_, 64);
+    let index_nsg = KnnGraph::from_file(file_name);
+    let sequenctial = (0..index_nsg.final_graph.len()).collect::<Vec<_>>();
+    let bfs: Vec<usize> = bfs::generate_bfs(&index_nsg.final_graph);
+    let dfs = dfs::generate_dfs(&index_nsg.final_graph);
+    let bdfs_4 = bdfs::generate_bdfs(&index_nsg.final_graph, 4);
+    let bdfs_8 = bdfs::generate_bdfs(&index_nsg.final_graph, 8);
+    let bdfs_16 = bdfs::generate_bdfs(&index_nsg.final_graph, 16);
+    let bdfs_32 = bdfs::generate_bdfs(&index_nsg.final_graph, 32);
+    let bdfs_64 = bdfs::generate_bdfs(&index_nsg.final_graph, 64);
     let ret: Box<[*mut [usize]; NUM_TRAVERSAL]> = Box::new([
         Box::into_raw(sequenctial.into_boxed_slice()),
         Box::into_raw(bfs.into_boxed_slice()),
@@ -118,11 +133,16 @@ fn init_logger(level: LevelFilter) {
 // unsigned id;
 // float distance;
 // bool flag;
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct Neighbor {
     id: u32,
     distance: f32,
-    // flag: bool,
+    flag: bool,
+}
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+pub struct SimpleNeighbor {
+    id: u32,
+    distance: f32,
 }
 
 pub fn read_neigbors(n: usize, location: &Path) -> Vec<Vec<Neighbor>> {
@@ -140,7 +160,11 @@ pub fn read_neigbors(n: usize, location: &Path) -> Vec<Vec<Neighbor>> {
             let mut parts = line.split_whitespace();
             let id = parts.next().unwrap().parse::<u32>().unwrap();
             let distance = parts.next().unwrap().parse::<f32>().unwrap();
-            let neighbor = Neighbor { id, distance };
+            let neighbor = Neighbor {
+                id,
+                distance,
+                flag: true,
+            };
             neighbors.push(neighbor);
         }
         all_nodes.push(neighbors);

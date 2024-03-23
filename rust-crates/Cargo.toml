@@ -2,3 +2,6 @@
 resolver = "2"
 members = ["rust-lib","rust-tools"]
 exclude = ["build*","target","test_*"]
+
+[profile.release]
+lto = true
