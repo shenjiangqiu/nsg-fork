@@ -16,7 +16,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// build the nsg index from knn graph
-    BuildIndex {
+    BuildIndexSync {
         r: usize,
         l: usize,
         c: usize,
@@ -47,7 +47,7 @@ fn main() {
         Commands::Translate => translate(),
         Commands::Analyze { start, end } => analyze(start, end),
         Commands::ParseResult { start, end } => parse_result(start, end),
-        Commands::BuildIndex {
+        Commands::BuildIndexSync {
             r,
             l,
             c,

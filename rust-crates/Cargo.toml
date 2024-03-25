@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["rust-lib","rust-tools"]
+members = ["rust_lib","rust-tools"]
 exclude = ["build*","target","test_*"]
 
 [profile.release]

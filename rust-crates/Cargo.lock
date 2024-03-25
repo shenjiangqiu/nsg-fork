@@ -518,7 +518,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
 
 [[package]]
-name = "rust-lib"
+name = "rust-tools"
+version = "0.1.0"
+dependencies = [
+ "clap 4.5.3",
+ "rayon",
+ "rust_lib",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "rust_lib"
 version = "0.1.0"
 dependencies = [
  "bincode",
@@ -531,17 +542,6 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "rust-tools"
-version = "0.1.0"
-dependencies = [
- "clap 4.5.3",
- "rayon",
- "rust-lib",
- "serde_json",
- "tracing",
 ]
 
 [[package]]

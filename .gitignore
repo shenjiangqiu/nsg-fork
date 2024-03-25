@@ -11,3 +11,8 @@ cmake-build-*
 .idea
 gist*
 *build
+*.txt
+*.json
+*.fvecs
+*.asm
+raidsjq

@@ -72,5 +72,6 @@
         "__string": "cpp"
     },
     "git.ignoreLimitWarning": true,
-    "C_Cpp.default.compilerPath": "/usr/bin/g++"
+    "C_Cpp.default.compilerPath": "/usr/bin/g++",
+    "rust-analyzer.cargo.features": ["avx512"]
 }

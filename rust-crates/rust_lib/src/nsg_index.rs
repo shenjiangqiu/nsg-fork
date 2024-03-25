@@ -3,14 +3,14 @@ use std::cell::RefCell;
 use bitvec::{bitvec, vec::BitVec};
 use itertools::Itertools;
 use rand::Rng;
-use tracing::{debug, info};
+use tracing::debug;
 
-use crate::{
-    distance::{DistanceTrait, L2Distance},
-    fvec::Fvec,
-    knn_graph::KnnGraph,
-    Neighbor, SimpleNeighbor,
-};
+#[cfg(not(feature = "avx512"))]
+use crate::distance::L2Distance as DistanceImpl;
+#[cfg(feature = "avx512")]
+use crate::distance::L2DistanceAvx512 as DistanceImpl;
+
+use crate::{distance::DistanceTrait, fvec::Fvec, knn_graph::KnnGraph, Neighbor, SimpleNeighbor};
 
 #[allow(unused)]
 pub struct IndexNsg<'a, 'b> {
@@ -32,7 +32,19 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
             c,
         }
     }
-
+    pub fn build(
+        &self,
+        traversal_ordering: &[u32],
+        cut_graph: &mut Vec<SimpleNeighbor>,
+        center_point_id: u32,
+        sync: bool,
+    ) {
+        if sync {
+            self.build_sync(traversal_ordering, cut_graph, center_point_id);
+        } else {
+            self.build_async(traversal_ordering, cut_graph, center_point_id);
+        }
+    }
     pub fn build_async(
         &self,
         traversal_ordering: &[u32],
@@ -54,7 +66,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                 STORE.with(|data| {
                     let mut data = data.borrow_mut();
                     if data.is_none() {
-                        info!("init data");
+                        // info!("init data");
                         *data = Some((
                             Vec::with_capacity(4096),
                             Vec::with_capacity(self.l + 1),
@@ -88,7 +100,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
             });
     }
 
-    pub fn build(
+    pub fn build_sync(
         &self,
         traversal_ordering: &[u32],
         cut_graph: &mut Vec<SimpleNeighbor>,
@@ -111,7 +123,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                     STORE.with(|data| {
                         let mut data = data.borrow_mut();
                         if data.is_none() {
-                            info!("init data");
+                            // info!("init data");
                             *data = Some((
                                 Vec::with_capacity(4096),
                                 Vec::with_capacity(self.l + 1),
@@ -160,7 +172,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
             }
             flags.set(*q_neigher as usize, true);
             let left_f = self.fvec.get_node(*q_neigher as usize);
-            let distance = L2Distance::distance(left_f, self.fvec.get_node(query as usize));
+            let distance = DistanceImpl::distance(left_f, self.fvec.get_node(query as usize));
             full_set.push(Neighbor {
                 id: *q_neigher,
                 distance,
@@ -184,7 +196,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                     break;
                 }
                 // get the distance between p and r
-                let distance = L2Distance::distance(
+                let distance = DistanceImpl::distance(
                     self.fvec.get_node(p.id as usize),
                     self.fvec.get_node(r.id as usize),
                 );
@@ -237,14 +249,18 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
     ) {
         let mut init_ids = Vec::with_capacity(l);
         let mut knn_index = 0;
-        for (neighber_id, index) in self.knn_graph.final_graph[start].iter().zip(0..l) {
+        for (neighber_id, index) in unsafe { self.knn_graph.final_graph.get_unchecked(start) }
+            .iter()
+            .zip(0..l)
+        {
             init_ids.push(*neighber_id);
             flags.set(*neighber_id as usize, true);
         }
-        let mut gen = rand::thread_rng();
         while init_ids.len() < l {
+            let mut gen = rand::thread_rng();
+
             let id = gen.gen_range(0..self.knn_graph.num);
-            if flags[id] {
+            if unsafe { *flags.get_unchecked(id) } {
                 continue;
             }
             init_ids.push(id as u32);
@@ -252,7 +268,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
         }
         for id in init_ids {
             let left_f = self.fvec.get_node(id as usize);
-            let distance = L2Distance::distance(target_node, left_f);
+            let distance = DistanceImpl::distance(target_node, left_f);
             full_set.push(Neighbor {
                 id,
                 distance,
@@ -271,22 +287,32 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
             // new_k, the new k for next step, will be set if a new neighor inserted into the retset
             let mut nk = l;
             // test k's neighbor, add them into retset
-            debug!("adding neighbors for k: {}, node_id: {}", k, ret_set[k].id);
-            if ret_set[k].flag {
-                ret_set[k].flag = false;
-                for neigber in self.knn_graph.final_graph[ret_set[k].id as usize].iter() {
-                    if flags[*neigber as usize] {
+            debug!(
+                "adding neighbors for k: {}, node_id: {}",
+                k,
+                unsafe { ret_set.get_unchecked(k) }.id
+            );
+            if unsafe { ret_set.get_unchecked(k) }.flag {
+                unsafe { ret_set.get_unchecked_mut(k) }.flag = false;
+                for neigber in unsafe {
+                    self.knn_graph
+                        .final_graph
+                        .get_unchecked(unsafe { ret_set.get_unchecked(k) }.id as usize)
+                }
+                .iter()
+                {
+                    if unsafe { *flags.get_unchecked(*neigber as usize) } {
                         continue;
                     }
                     flags.set(*neigber as usize, true);
                     let left_f = self.fvec.get_node(*neigber as usize);
-                    let distance = L2Distance::distance(target_node, left_f);
+                    let distance = DistanceImpl::distance(target_node, left_f);
                     full_set.push(Neighbor {
                         id: *neigber,
                         distance,
                         flag: true,
                     });
-                    if distance < ret_set[l - 1].distance {
+                    if distance < unsafe { ret_set.get_unchecked(l - 1).distance } {
                         // insert it !
                         let mut i = l - 2;
                         let insertd_place = binary_search_insert(ret_set, *neigber, distance);
@@ -520,7 +546,7 @@ mod tests {
         let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * 2];
         let thread_pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
         thread_pool.install(|| {
-            index_nsg.build(&traversal_ordering, &mut cut_graph, center_point);
+            index_nsg.build_sync(&traversal_ordering, &mut cut_graph, center_point);
         });
         info!("{:?}", cut_graph.len());
         info!("{:?}", cut_graph);

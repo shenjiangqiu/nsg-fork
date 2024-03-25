@@ -476,10 +476,8 @@ namespace efanna2e
         std::mutex progress_lock;
         */
         unsigned range = parameters.Get<unsigned>("R");
-        unsigned num_threads = parameters.Get<unsigned>("Threads");
         std::vector<std::mutex> locks(nd_);
 
-        omp_set_num_threads((int)num_threads);
 #pragma omp parallel
         {
             // unsigned cnt = 0;
