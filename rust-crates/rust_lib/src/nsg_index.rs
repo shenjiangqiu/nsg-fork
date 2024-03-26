@@ -101,6 +101,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                 current_raw_cut_graph = unsafe { current_raw_cut_graph.add(num_threads * self.r) };
                 // do something
                 full_set.clear();
+                // println!("fullset capacity: {}", full_set.capacity());
                 ret_set.clear();
                 flags.clear();
                 flags.resize(self.knn_graph.num, false);
@@ -160,6 +161,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                 full_set.clear();
                 ret_set.clear();
                 flags.clear();
+                // println!("fullset capacity: {}", full_set.capacity());
                 flags.resize(self.knn_graph.num, false);
                 current_rounds += 1;
                 if current_rounds % barrier_gap == 0 && current_rounds < num_rounds - 10 {

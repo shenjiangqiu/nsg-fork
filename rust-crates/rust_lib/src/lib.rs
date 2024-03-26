@@ -71,13 +71,13 @@ pub fn bench_build_index(
                 .map(|x| x as u32)
                 .collect_vec(),
         ),
-        (
-            "bdfs-4",
-            bdfs::generate_bdfs(&knn_graph.final_graph, 4)
-                .into_iter()
-                .map(|x| x as u32)
-                .collect_vec(),
-        ),
+        // (
+        //     "bdfs-4",
+        //     bdfs::generate_bdfs(&knn_graph.final_graph, 4)
+        //         .into_iter()
+        //         .map(|x| x as u32)
+        //         .collect_vec(),
+        // ),
         (
             "bdfs-8",
             bdfs::generate_bdfs(&knn_graph.final_graph, 8)
@@ -85,16 +85,16 @@ pub fn bench_build_index(
                 .map(|x| x as u32)
                 .collect_vec(),
         ),
-        (
-            "bdfs-16",
-            bdfs::generate_bdfs(&knn_graph.final_graph, 16)
-                .into_iter()
-                .map(|x| x as u32)
-                .collect_vec(),
-        ),
+        // (
+        //     "bdfs-16",
+        //     bdfs::generate_bdfs(&knn_graph.final_graph, 16)
+        //         .into_iter()
+        //         .map(|x| x as u32)
+        //         .collect_vec(),
+        // ),
     ];
     let mut all_results = vec![];
-    for num_thread in [80, 60, 40, 20] {
+    for num_thread in [60] {
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(num_thread)
             .build()
@@ -117,7 +117,7 @@ pub fn bench_build_index(
                 barrial: None,
             });
 
-            for barrier in [64, 128, 256, 512, 1024] {
+            for barrier in [256] {
                 info!(
                     "runing async: {} {}, barrier: {}",
                     name, num_thread, barrier

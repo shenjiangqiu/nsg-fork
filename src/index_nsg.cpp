@@ -530,6 +530,10 @@ namespace efanna2e
         init_graph(parameters);
         SimpleNeighbor *cut_graph_ = new SimpleNeighbor[nd_ * (size_t)range];
         Link(parameters, cut_graph_, traversal_sequence);
+        std::cout << cut_graph_[100].id;
+        std::cout << cut_graph_[200].id;
+        std::cout << cut_graph_[300].distance;
+        std::cout << cut_graph_[nd_ * (size_t)range  - 1].distance;
 
         //        final_graph_.resize(nd_);
         //
