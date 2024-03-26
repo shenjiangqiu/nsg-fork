@@ -30,6 +30,7 @@ struct Report<'a> {
     time: u64,
     traversal: &'a str,
     num_thread: usize,
+    barrial: Option<usize>,
 }
 pub fn bench_build_index_sync(
     r: usize,
@@ -91,23 +92,9 @@ pub fn bench_build_index(
                 .map(|x| x as u32)
                 .collect_vec(),
         ),
-        (
-            "bdfs-32",
-            bdfs::generate_bdfs(&knn_graph.final_graph, 32)
-                .into_iter()
-                .map(|x| x as u32)
-                .collect_vec(),
-        ),
-        (
-            "bdfs-64",
-            bdfs::generate_bdfs(&knn_graph.final_graph, 64)
-                .into_iter()
-                .map(|x| x as u32)
-                .collect_vec(),
-        ),
     ];
     let mut all_results = vec![];
-    for num_thread in [80, 64, 40] {
+    for num_thread in [80, 60, 40, 20] {
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(num_thread)
             .build()
@@ -117,17 +104,46 @@ pub fn bench_build_index(
             let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * r];
             let now = Instant::now();
             thread_pool.install(|| {
-                index_nsg.build(&traversal, &mut cut_graph, center_point_id, sync);
+                index_nsg.build(&traversal, &mut cut_graph, center_point_id, sync, None);
             });
+            black_box(cut_graph);
             let elapsed = now.elapsed();
             let secs = elapsed.as_secs();
-            black_box(cut_graph);
             info!("{} {} {}", secs, name, num_thread);
             all_results.push(Report {
                 time: secs,
                 traversal: name,
                 num_thread,
+                barrial: None,
             });
+
+            for barrier in [64, 128, 256, 512, 1024] {
+                info!(
+                    "runing async: {} {}, barrier: {}",
+                    name, num_thread, barrier
+                );
+                let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * r];
+                let now = Instant::now();
+                thread_pool.install(|| {
+                    index_nsg.build(
+                        &traversal,
+                        &mut cut_graph,
+                        center_point_id,
+                        sync,
+                        Some(barrier),
+                    );
+                });
+                black_box(cut_graph);
+                let elapsed = now.elapsed();
+                let secs = elapsed.as_secs();
+                info!("{} {} {}", secs, name, num_thread);
+                all_results.push(Report {
+                    time: secs,
+                    traversal: name,
+                    num_thread,
+                    barrial: Some(barrier),
+                });
+            }
         }
     }
     let writer = BufWriter::new(File::create(result_path).unwrap());

@@ -43,6 +43,7 @@ enum Commands {
 fn main() {
     init_logger_info();
     let cli = Cli::parse();
+    
     match cli.command {
         Commands::Translate => translate(),
         Commands::Analyze { start, end } => analyze(start, end),
@@ -83,14 +84,14 @@ fn parse_result(start: usize, end: usize) {
     }
 }
 fn analyze(start: usize, end: usize) {
-    let nsg_trace_path = Path::new("neighbors.bin");
+    let nsg_trace_path = Path::new("raidsjq/neighbors.bin");
     let knn_path = Path::new("gist.100nn.graph");
     let knn_graph = rust_lib::knn_graph::KnnGraph::from_file(knn_path);
     info!("Loading knn graph");
     info!("Loading neighbors");
     let neighbors = rust_lib::read_bin(nsg_trace_path);
     use rayon::prelude::*;
-    (start..end).into_par_iter().for_each(move |i| {
+    (start..=end).step_by(8).par_bridge().for_each(move |i| {
         info!("Analyzing sequence {}", i);
         let sequential_result = rust_lib::analyze_sequential(&neighbors, i);
         info!("Analyzing bfs");
@@ -103,7 +104,7 @@ fn analyze(start: usize, end: usize) {
         serde_json::to_writer(File::create(bfs_file).unwrap(), &bfs_result).unwrap();
         let dfs_file = format!("./s{i}-dfs.json");
         serde_json::to_writer(File::create(dfs_file).unwrap(), &dfs_result).unwrap();
-        (4..32).into_par_iter().for_each(|max_depth| {
+        (4..=64).step_by(4).par_bridge().for_each(|max_depth| {
             info!("Analyzing bdfs with max depth {}", max_depth);
             let bfs_result =
                 rust_lib::analyze_knn_bdfs(&neighbors, &knn_graph.final_graph, i, max_depth);

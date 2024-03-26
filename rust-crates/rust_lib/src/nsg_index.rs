@@ -3,7 +3,6 @@ use std::cell::RefCell;
 use bitvec::{bitvec, vec::BitVec};
 use itertools::Itertools;
 use rand::Rng;
-use tracing::debug;
 
 #[cfg(not(feature = "avx512"))]
 use crate::distance::L2Distance as DistanceImpl;
@@ -21,6 +20,15 @@ pub struct IndexNsg<'a, 'b> {
     c: usize,
 }
 
+#[derive(Clone, Copy)]
+/// this struct can only be used in this file
+struct RawCutNeighbor {
+    pub point: *mut SimpleNeighbor,
+}
+
+unsafe impl Sync for RawCutNeighbor {}
+unsafe impl Send for RawCutNeighbor {}
+
 impl<'a, 'b> IndexNsg<'a, 'b> {
     pub fn new(knn_graph: &'a KnnGraph, fvec: &'b Fvec, l: usize, r: usize, c: usize) -> Self {
         assert_eq!(fvec.num, knn_graph.num);
@@ -37,67 +45,128 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
         traversal_ordering: &[u32],
         cut_graph: &mut Vec<SimpleNeighbor>,
         center_point_id: u32,
-        sync: bool,
+        _sync: bool,
+        barrier: Option<usize>,
     ) {
-        if sync {
-            self.build_sync(traversal_ordering, cut_graph, center_point_id);
+        if let Some(barrier) = barrier {
+            self.build_async(traversal_ordering, cut_graph, center_point_id, barrier);
         } else {
-            self.build_async(traversal_ordering, cut_graph, center_point_id);
+            self.build_async_no_barriar(traversal_ordering, cut_graph, center_point_id);
         }
     }
-    pub fn build_async(
+    pub fn build_async_no_barriar(
         &self,
         traversal_ordering: &[u32],
         cut_graph: &mut Vec<SimpleNeighbor>,
         center_point_id: u32,
     ) {
         use rayon::prelude::*;
-        // let current_threads = rayon::current_num_threads();
-        let cut_graph = cut_graph.chunks_mut(self.r);
-        let tasks = cut_graph.into_iter().zip(traversal_ordering);
-        thread_local! {
-            static STORE: RefCell<Option<(Vec<Neighbor>,Vec<Neighbor>,BitVec)>> = RefCell::new(None);
-        };
-        tasks
-            .into_iter()
-            .enumerate()
-            .par_bridge()
-            .for_each(|(index, (cut, node_id))| {
-                STORE.with(|data| {
-                    let mut data = data.borrow_mut();
-                    if data.is_none() {
-                        // info!("init data");
-                        *data = Some((
-                            Vec::with_capacity(4096),
-                            Vec::with_capacity(self.l + 1),
-                            BitVec::with_capacity(self.knn_graph.num),
-                        ));
-                    }
-                    let (full_set, ret_set, flags) = data.as_mut().unwrap();
-                    full_set.clear();
-                    ret_set.clear();
-                    flags.clear();
-                    flags.resize(self.knn_graph.num, false);
+        let num_nodes = traversal_ordering.len();
+        assert_eq!(num_nodes, self.knn_graph.num as usize);
+        assert_eq!(cut_graph.len(), num_nodes * self.r);
 
-                    debug!("start running : {}, {}", node_id, index);
-                    self.get_neighbors(
-                        center_point_id as usize,
-                        self.fvec.get_node(*node_id as usize),
-                        full_set,
-                        ret_set,
-                        flags,
-                        self.l,
-                    );
-                    debug!("full_set: {:?}", full_set);
-                    debug!("ret_set: {:?}", ret_set);
-                    debug!("flags: {:?}", flags);
-                    self.sync_prune(*node_id, full_set, flags, cut);
-                    debug!("cut: {:?}", cut);
-                    debug!("flags: {:?}", flags);
-                    debug!("full_set: {:?}", full_set);
-                    debug!("finished running: {}, {}", node_id, index);
-                });
-            });
+        let cut_graph_mut_point = cut_graph.as_mut_ptr();
+        let raw_cut_graph = RawCutNeighbor {
+            point: cut_graph_mut_point,
+        };
+
+        let num_threads = rayon::current_num_threads();
+
+        (0..num_threads).into_par_iter().for_each(|thread_idx| {
+            // inital data
+            let mut full_set = Vec::with_capacity(4096);
+            let mut ret_set = Vec::with_capacity(self.l + 1);
+            let mut flags = bitvec!(0; self.knn_graph.num);
+
+            let mut current_idx = thread_idx;
+            let raw_cut_graph = raw_cut_graph.clone();
+            let mut current_raw_cut_graph = unsafe { raw_cut_graph.point.add(thread_idx * self.r) };
+
+            while current_idx < num_nodes {
+                let node_id = unsafe { traversal_ordering.get_unchecked(current_idx) };
+                self.get_neighbors(
+                    center_point_id as usize,
+                    self.fvec.get_node(*node_id as usize),
+                    &mut full_set,
+                    &mut ret_set,
+                    &mut flags,
+                    self.l,
+                );
+                let cut = current_raw_cut_graph as *mut SimpleNeighbor;
+                let cut = unsafe { std::slice::from_raw_parts_mut(cut, self.r) };
+
+                self.sync_prune(*node_id, &mut full_set, &mut flags, cut);
+
+                current_idx += num_threads;
+                current_raw_cut_graph = unsafe { current_raw_cut_graph.add(num_threads * self.r) };
+                // do something
+                full_set.clear();
+                ret_set.clear();
+                flags.clear();
+                flags.resize(self.knn_graph.num, false);
+            }
+        });
+    }
+
+    pub fn build_async(
+        &self,
+        traversal_ordering: &[u32],
+        cut_graph: &mut Vec<SimpleNeighbor>,
+        center_point_id: u32,
+        barrier_gap: usize,
+    ) {
+        use rayon::prelude::*;
+        let num_nodes = traversal_ordering.len();
+        assert_eq!(num_nodes, self.knn_graph.num as usize);
+        assert_eq!(cut_graph.len(), num_nodes * self.r);
+
+        let cut_graph_mut_point = cut_graph.as_mut_ptr();
+        let raw_cut_graph = RawCutNeighbor {
+            point: cut_graph_mut_point,
+        };
+
+        let num_threads = rayon::current_num_threads();
+        let barrier = std::sync::Barrier::new(num_threads);
+
+        (0..num_threads).into_par_iter().for_each(|thread_idx| {
+            // inital data
+            let mut full_set = Vec::with_capacity(4096);
+            let mut ret_set = Vec::with_capacity(self.l + 1);
+            let mut flags = bitvec!(0; self.knn_graph.num);
+
+            let mut current_idx = thread_idx;
+            let raw_cut_graph = raw_cut_graph.clone();
+            let mut current_raw_cut_graph = unsafe { raw_cut_graph.point.add(thread_idx * self.r) };
+            let num_rounds = num_nodes / num_threads;
+            let mut current_rounds = 0;
+            while current_idx < num_nodes {
+                let node_id = unsafe { traversal_ordering.get_unchecked(current_idx) };
+                self.get_neighbors(
+                    center_point_id as usize,
+                    self.fvec.get_node(*node_id as usize),
+                    &mut full_set,
+                    &mut ret_set,
+                    &mut flags,
+                    self.l,
+                );
+                let cut = current_raw_cut_graph as *mut SimpleNeighbor;
+                let cut = unsafe { std::slice::from_raw_parts_mut(cut, self.r) };
+
+                self.sync_prune(*node_id, &mut full_set, &mut flags, cut);
+
+                current_idx += num_threads;
+                current_raw_cut_graph = unsafe { current_raw_cut_graph.add(num_threads * self.r) };
+                // do something
+                full_set.clear();
+                ret_set.clear();
+                flags.clear();
+                flags.resize(self.knn_graph.num, false);
+                current_rounds += 1;
+                if current_rounds % barrier_gap == 0 && current_rounds < num_rounds - 10 {
+                    barrier.wait();
+                }
+            }
+        });
     }
 
     pub fn build_sync(
@@ -114,12 +183,12 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
         thread_local! {
             static STORE: RefCell<Option<(Vec<Neighbor>,Vec<Neighbor>,BitVec)>> = RefCell::new(None);
         };
-        for (chunk_idx, (cut, order)) in tasks.into_iter().enumerate() {
+        for (_chunk_idx, (cut, order)) in tasks.into_iter().enumerate() {
             let cut = cut.collect::<Vec<_>>();
             cut.into_par_iter()
                 .zip(order)
                 .enumerate()
-                .for_each(|(index, (cut, node_id))| {
+                .for_each(|(_index, (cut, node_id))| {
                     STORE.with(|data| {
                         let mut data = data.borrow_mut();
                         if data.is_none() {
@@ -136,7 +205,6 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                         flags.clear();
                         flags.resize(self.knn_graph.num, false);
 
-                        debug!("start running : {}, {}:{}", node_id, chunk_idx, index);
                         self.get_neighbors(
                             center_point_id as usize,
                             self.fvec.get_node(*node_id as usize),
@@ -145,15 +213,8 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                             flags,
                             self.l,
                         );
-                        debug!("full_set: {:?}", full_set);
-                        debug!("ret_set: {:?}", ret_set);
-                        debug!("flags: {:?}", flags);
-                        self.sync_prune(*node_id, full_set, flags, cut);
-                        debug!("cut: {:?}", cut);
-                        debug!("flags: {:?}", flags);
-                        debug!("full_set: {:?}", full_set);
 
-                        debug!("finished running: {}, {}:{}", node_id, chunk_idx, index);
+                        self.sync_prune(*node_id, full_set, flags, cut);
                     });
                 });
         }
@@ -287,11 +348,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
             // new_k, the new k for next step, will be set if a new neighor inserted into the retset
             let mut nk = l;
             // test k's neighbor, add them into retset
-            debug!(
-                "adding neighbors for k: {}, node_id: {}",
-                k,
-                unsafe { ret_set.get_unchecked(k) }.id
-            );
+
             if unsafe { ret_set.get_unchecked(k) }.flag {
                 unsafe { ret_set.get_unchecked_mut(k) }.flag = false;
                 for neigber in unsafe {
@@ -323,7 +380,6 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                 }
             }
             if nk <= k {
-                debug!("nk: {}, k: {}", nk, k);
                 k = nk;
             } else {
                 k += 1;
@@ -383,8 +439,7 @@ mod tests {
     use rayon::ThreadPoolBuilder;
 
     use super::*;
-    use crate::init_logger_debug;
-    use tracing::info;
+    use crate::{info, init_logger_debug};
     #[test]
     fn test_binary_insert() {
         let mut sorted_array = vec![
@@ -550,5 +605,43 @@ mod tests {
         });
         info!("{:?}", cut_graph.len());
         info!("{:?}", cut_graph);
+    }
+
+    #[test]
+    fn test_index_nsg_async() {
+        init_logger_debug();
+        let final_graph = build_final_graph();
+        let knn_graph = KnnGraph::new(final_graph);
+
+        let data = build_data();
+        let f_vec = Fvec::new(16, 16, data);
+        let index_nsg = IndexNsg::new(&knn_graph, &f_vec, 2, 2, 4);
+        let center_point = index_nsg.build_center_point();
+        info!("center: {:?}", center_point);
+        let traversal_ordering = (0u32..knn_graph.num as u32).collect_vec();
+        let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * 2];
+        let thread_pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
+        thread_pool.install(|| {
+            index_nsg.build_async_no_barriar(&traversal_ordering, &mut cut_graph, center_point);
+        });
+        info!("{:?}", cut_graph.len());
+        info!("{:?}", cut_graph);
+    }
+
+    #[test]
+    fn test_numthread() {
+        init_logger_debug();
+        use rayon::prelude::*;
+        let thread_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(16)
+            .build()
+            .unwrap();
+        thread_pool.install(|| {
+            (0..17).into_par_iter().for_each(|index| {
+                info!("thread: {}", index);
+                sleep(Duration::from_secs(1));
+                info!("sleep 1s: {}", index);
+            });
+        })
     }
 }
