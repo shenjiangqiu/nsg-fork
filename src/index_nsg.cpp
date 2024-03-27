@@ -8,7 +8,8 @@
 #include <rust-lib.h>
 #include "efanna2e/exceptions.h"
 #include "efanna2e/parameters.h"
-
+// #include <efanna2e/avx512.h>
+#include <efanna2e/avx256.h>
 namespace efanna2e
 {
 #define _CONTROL_NUM 100
@@ -230,7 +231,13 @@ namespace efanna2e
                 continue;
             // std::cout<<id<<std::endl;
             // the distance from query to id
-            float dist = distance_->compare(data_ + dimension_ * (size_t)id, query,
+            // float dist = computeL2Distance(data_ + dimension_ * (size_t)id, query,
+            //                                 (unsigned)dimension_);
+            // float dist = distance_->compare(data_ + dimension_ * (size_t)id, query,
+            //                                 (unsigned)dimension_);
+            // float dist = avx512l2translated(data_ + dimension_ * (size_t)id, query,
+            //                                 (unsigned)dimension_);
+            float dist = avx256l2translated(data_ + dimension_ * (size_t)id, query,
                                             (unsigned)dimension_);
             retset[i] = Neighbor(id, dist, true);
             fullset.push_back(retset[i]);
@@ -319,9 +326,18 @@ namespace efanna2e
             unsigned id = final_graph_[q][nn];
             if (flags[id])
                 continue;
-            float dist =
-                distance_->compare(data_ + dimension_ * (size_t)q,
-                                   data_ + dimension_ * (size_t)id, (unsigned)dimension_);
+            // float dist =
+            //     computeL2Distance(data_ + dimension_ * (size_t)q,
+            //                        data_ + dimension_ * (size_t)id, (unsigned)dimension_);
+            // float dist = distance_->compare(data_ + dimension_ * (size_t)q,
+            //                                 data_ + dimension_ * (size_t)id,
+            //                                 (unsigned)dimension_);
+            // float dist = avx512l2translated(data_ + dimension_ * (size_t)q,
+            //                                 data_ + dimension_ * (size_t)id,
+            //                                 (unsigned)dimension_);
+            float dist = avx256l2translated(data_ + dimension_ * (size_t)q,
+                                            data_ + dimension_ * (size_t)id,
+                                            (unsigned)dimension_);
             pool.push_back(Neighbor(id, dist, true));
         }
 
@@ -483,7 +499,7 @@ namespace efanna2e
             // unsigned cnt = 0;
             std::vector<Neighbor> pool, tmp;
             boost::dynamic_bitset<> flags{nd_, 0};
-#pragma omp for schedule(dynamic, 100)
+#pragma omp for schedule(dynamic, 1)
             for (unsigned n = 0; n < nd_; ++n)
             {
                 unsigned n_index = traversal_sequence[n];
@@ -533,7 +549,7 @@ namespace efanna2e
         std::cout << cut_graph_[100].id;
         std::cout << cut_graph_[200].id;
         std::cout << cut_graph_[300].distance;
-        std::cout << cut_graph_[nd_ * (size_t)range  - 1].distance;
+        std::cout << cut_graph_[nd_ * (size_t)range - 1].distance;
 
         //        final_graph_.resize(nd_);
         //

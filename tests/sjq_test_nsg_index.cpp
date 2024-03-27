@@ -13,13 +13,12 @@ int main(int argc, char **argv)
     {
         std::vector<int> v;
 
-#pragma omp for schedule(static, 10)
+#pragma omp for schedule(dynamic, 1)
         for (int i = 0; i < 100; i++)
         {
-            sleep(i+1);
+            sleep(2);
             auto thread_idx = omp_get_thread_num();
             std::cout << "i: "<<i<<" thread: "<<thread_idx<<std::endl;
-
         }
     }
 

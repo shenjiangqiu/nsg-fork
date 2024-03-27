@@ -46,13 +46,62 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
         cut_graph: &mut Vec<SimpleNeighbor>,
         center_point_id: u32,
         _sync: bool,
+        old: bool,
         barrier: Option<usize>,
     ) {
-        if let Some(barrier) = barrier {
+        if old {
+            self.build_async_no_barriar_old(traversal_ordering, cut_graph, center_point_id);
+        } else if let Some(barrier) = barrier {
             self.build_async(traversal_ordering, cut_graph, center_point_id, barrier);
         } else {
             self.build_async_no_barriar(traversal_ordering, cut_graph, center_point_id);
         }
+    }
+    pub fn build_async_no_barriar_old(
+        &self,
+        traversal_ordering: &[u32],
+        cut_graph: &mut Vec<SimpleNeighbor>,
+        center_point_id: u32,
+    ) {
+        use rayon::prelude::*;
+        // let current_threads = rayon::current_num_threads();
+        let cut_graph = cut_graph.chunks_mut(self.r);
+        let tasks = cut_graph.into_iter().zip(traversal_ordering);
+        thread_local! {
+            static STORE: RefCell<Option<(Vec<Neighbor>,Vec<Neighbor>,BitVec)>> = RefCell::new(None);
+        };
+        tasks
+            .into_iter()
+            .enumerate()
+            .par_bridge()
+            .for_each(|(_index, (cut, node_id))| {
+                STORE.with(|data| {
+                    let mut data = data.borrow_mut();
+                    if data.is_none() {
+                        // info!("init data");
+                        *data = Some((
+                            Vec::with_capacity(4096),
+                            Vec::with_capacity(self.l + 1),
+                            BitVec::with_capacity(self.knn_graph.num),
+                        ));
+                    }
+                    let (full_set, ret_set, flags) = data.as_mut().unwrap();
+                    full_set.clear();
+                    ret_set.clear();
+                    flags.clear();
+                    flags.resize(self.knn_graph.num, false);
+
+                    self.get_neighbors(
+                        center_point_id as usize,
+                        self.fvec.get_node(*node_id as usize),
+                        full_set,
+                        ret_set,
+                        flags,
+                        self.l,
+                    );
+                    self.sync_prune(*node_id, full_set, flags, cut);
+                });
+            });
     }
     pub fn build_async_no_barriar(
         &self,
