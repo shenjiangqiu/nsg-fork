@@ -1,6 +1,9 @@
 //! the bdfs algorithm
 
+use tracing::{info, warn};
+
 pub fn generate_bdfs(knn_graph: &Vec<Vec<u32>>, max_depth: usize) -> Vec<usize> {
+    info!("start to generate bdfs");
     let total_nodes = knn_graph.len();
     let mut visited_nodes_count = 0;
     let mut visited = vec![false; knn_graph.len()];
@@ -21,7 +24,9 @@ pub fn generate_bdfs(knn_graph: &Vec<Vec<u32>>, max_depth: usize) -> Vec<usize> 
         if visited_nodes_count == total_nodes {
             break;
         }
+        warn!("bdfs not finished, finding a new start node");
     }
+    info!("bdfs generated");
     nodes_to_visite
 }
 fn explore(

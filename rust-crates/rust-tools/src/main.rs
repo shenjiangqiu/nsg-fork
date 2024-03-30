@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use rust_lib::{init_logger_info, AnalyzeResult};
+use rust_lib::{init_logger_info, AnalyzeResult, Traversal};
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -32,18 +32,52 @@ enum Commands {
         f_vec_path: PathBuf,
         result_graph: PathBuf,
     },
+    BuildIndexAsyncLimited {
+        limit: usize,
+        r: usize,
+        l: usize,
+        c: usize,
+        knn_graph: PathBuf,
+        f_vec_path: PathBuf,
+        result_graph: PathBuf,
+    },
+    BuildIndexAsyncWith {
+        r: usize,
+        l: usize,
+        c: usize,
+        knn_graph: PathBuf,
+        f_vec_path: PathBuf,
+        traversal: Traversal,
+    },
+    CacheAnalyze {
+        r: usize,
+        l: usize,
+        c: usize,
+        knn_graph: PathBuf,
+        f_vec_path: PathBuf,
+        result: PathBuf,
+    },
     /// translate the txt trace into bin
     Translate,
     /// analyze the trace
-    Analyze { start: usize, end: usize },
+    Analyze {
+        start: usize,
+        end: usize,
+    },
     /// analyze the result
-    ParseResult { start: usize, end: usize },
+    ParseResult {
+        start: usize,
+        end: usize,
+    },
+    CheckKnnGraph {
+        knn_graph: PathBuf,
+    },
 }
 
 fn main() {
     init_logger_info();
     let cli = Cli::parse();
-    
+
     match cli.command {
         Commands::Translate => translate(),
         Commands::Analyze { start, end } => analyze(start, end),
@@ -64,6 +98,43 @@ fn main() {
             f_vec_path,
             result_graph,
         } => rust_lib::bench_build_index_async(r, l, c, &knn_graph, &f_vec_path, &result_graph),
+        Commands::BuildIndexAsyncLimited {
+            limit,
+            r,
+            l,
+            c,
+            knn_graph,
+            f_vec_path,
+            result_graph,
+        } => rust_lib::bench_build_index_async_limited(
+            limit,
+            r,
+            l,
+            c,
+            &knn_graph,
+            &f_vec_path,
+            &result_graph,
+        ),
+        Commands::BuildIndexAsyncWith {
+            r,
+            l,
+            c,
+            knn_graph,
+            f_vec_path,
+            traversal,
+        } => rust_lib::bench_build_with(r, l, c, &knn_graph, &f_vec_path, false, traversal, None),
+        Commands::CacheAnalyze {
+            r,
+            l,
+            c,
+            knn_graph,
+            f_vec_path,
+            result,
+        } => rust_lib::analyze_cache(r, l, c, &knn_graph, &f_vec_path, None, &result),
+        Commands::CheckKnnGraph { knn_graph } => {
+            info!("Checking knn graph: {:?}", knn_graph);
+            let _knn_graph = rust_lib::knn_graph::KnnGraph::try_from_file(&knn_graph).unwrap();
+        }
     }
 }
 fn parse_result(start: usize, end: usize) {

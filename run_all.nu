@@ -1,11 +1,9 @@
-# ./build/tests/test_nsg_index sift_base.fvecs sift_200nn.graph 40 50 500 sift.nsg | save -f nsg_index_sift_200.txt
-# ./build/tests/test_nsg_index gist_base.fvecs gist_400nn.graph 60 70 500 gist.nsg | save -f nsg_index_gist_400.txt
 
-~/.cargo/bin/rust-tools build-index-async 50 40 500 ./gist.100nn.graph ./gist_base.fvecs ./result-gist100-async.json
-# ~/.cargo/bin/rust-tools build-index-sync 70 60 500 ./gist_400nn.graph ./gist_base.fvecs ./result-gist-sync.json | save -f gist_index_400_sync.txt
+~/.cargo/bin/rust-tools build-index-async 50 40 500 ./dataset/crawl/crawl_100nn.graph ./dataset/crawl/crawl_base.fvecs ./final_result/result_craws.json
+~/.cargo/bin/rust-tools build-index-async 50 40 500 ./dataset/glove/glove_100nn.graph ./dataset/glove/glove-100_base.fvecs ./final_result/result_glove.json
+~/.cargo/bin/rust-tools build-index-async 50 40 500 ./dataset/gist/gist_100nn.graph ./dataset/gist/gist_base.fvecs ./final_result/result_gist.json
+~/.cargo/bin/rust-tools build-index-async 50 40 500 ./dataset/sift/sift_200nn.graph ./dataset/sift/sift_base.fvecs ./final_result/result_sift.json
 
-~/.cargo/bin/rust-tools build-index-async 50 40 500 ./sift_200nn.graph ./sift_base.fvecs ./result-sift200-async.json
-# ~/.cargo/bin/rust-tools build-index-sync 50 40 500 ./sift_200nn.graph ./sift_base.fvecs ./result-sift-sync.json | save -f sift_index_200_sync.txt
-
-~/.cargo/bin/rust-tools build-index-async 50 40 500 ./glove_100nn.graph glove-100/glove-100_base.fvecs ./result-glove100-async.json
-
+~/.cargo/bin/rust-tools build-index-async-limited 50 40 500 /mnt/raiddisk/sjq/deep.100M.100NN.graph /mnt/raiddisk/sjq/deep_100M_base.fvecs ./final_result/result_depp100m.json
+~/.cargo/bin/rust-tools build-index-async-limited 50 40 500 /mnt/raiddisk/sjq/sift100M.100NN.graph /mnt/raiddisk/sjq/sift_100M.fvecs ./final_result/result_sift100m.json
+~/.cargo/bin/rust-tools build-index-async-limited 50 40 500 /home/sjq/git/nsg-fork/raidsjq/spacev.100M.100NN.graph /home/sjq/git/nsg-fork/raidsjq/spacev100m_base.fvecs ./final_result/result_spacev100m.json

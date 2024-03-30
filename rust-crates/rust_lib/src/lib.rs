@@ -9,8 +9,9 @@ use std::{
     time::Instant,
 };
 pub mod knn_graph;
+use clap::ValueEnum;
 use itertools::Itertools;
-use nsg_index::IndexNsg;
+use nsg_index::{CacheResult, IndexNsg};
 use rayon::ThreadPoolBuilder;
 use serde::{Deserialize, Serialize};
 use tracing::{info, level_filters::LevelFilter};
@@ -24,15 +25,21 @@ pub mod distance;
 pub mod fvec;
 pub mod nsg_index;
 pub const NUM_TRAVERSAL: usize = 8;
-
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CacheReport {
+    pub result: Vec<CacheResult>,
+    pub traversal: String,
+    pub limit: Option<usize>,
+}
 #[derive(Serialize, Deserialize, Debug)]
 struct Report<'a> {
-    time: u64,
+    time: f64,
     traversal: &'a str,
     num_thread: usize,
     old: bool,
     barrial: Option<usize>,
 }
+
 pub fn bench_build_index_sync(
     r: usize,
     l: usize,
@@ -43,6 +50,293 @@ pub fn bench_build_index_sync(
 ) {
     bench_build_index(r, l, c, knn_path, f_vec_path, result_path, true)
 }
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, ValueEnum)]
+pub enum Traversal {
+    Seq,
+    Bfs,
+    Dfs,
+    Bdfs,
+}
+pub fn analyze_cache(
+    r: usize,
+    l: usize,
+    c: usize,
+    knn_path: &Path,
+    f_vec_path: &Path,
+    limit: Option<usize>,
+    result_path: &Path,
+) {
+    let knn_graph = knn_graph::KnnGraph::from_file(knn_path);
+    let fvec = fvec::Fvec::from_file(f_vec_path);
+    let index_nsg = IndexNsg::new(&knn_graph, &fvec, l, r, c);
+    let center_point_id = index_nsg.build_center_point();
+    info!("build traversal");
+    let traversals = [
+        ("sequential_hot", (0..knn_graph.num as u32).collect_vec()),
+        (
+            "bfs",
+            bfs::generate_bfs(&knn_graph.final_graph)
+                .into_iter()
+                .map(|x| x as u32)
+                .collect_vec(),
+        ),
+        (
+            "dfs",
+            generate_dfs(&knn_graph.final_graph)
+                .into_iter()
+                .map(|x| x as u32)
+                .collect_vec(),
+        ),
+        (
+            "bdfs-8",
+            bdfs::generate_bdfs(&knn_graph.final_graph, 8)
+                .into_iter()
+                .map(|x| x as u32)
+                .collect_vec(),
+        ),
+    ];
+    info!("start to analyze");
+    let mut all_results = vec![];
+    for num_thread in [80] {
+        let thread_pool = ThreadPoolBuilder::new()
+            .num_threads(num_thread)
+            .build()
+            .unwrap();
+        for (name, traversal) in &traversals {
+            thread_pool.install(|| {
+                info!("runing async: {} {}, OLD impl", name, num_thread,);
+                let result = index_nsg.analyze_cache(&traversal, center_point_id, limit);
+                all_results.push(CacheReport {
+                    traversal: name.to_string(),
+                    result,
+                    limit,
+                });
+            });
+        }
+    }
+    let writer = BufWriter::new(File::create(result_path).unwrap());
+    serde_json::to_writer(writer, &all_results).unwrap();
+}
+pub fn bench_build_with(
+    r: usize,
+    l: usize,
+    c: usize,
+    knn_path: &Path,
+    f_vec_path: &Path,
+    sync: bool,
+    traversal: Traversal,
+    limit: Option<usize>,
+) {
+    let knn_graph = knn_graph::KnnGraph::from_file(knn_path);
+    let fvec = fvec::Fvec::from_file(f_vec_path);
+    let index_nsg = IndexNsg::new(&knn_graph, &fvec, l, r, c);
+    let center_point_id = index_nsg.build_center_point();
+    let traversal = match traversal {
+        Traversal::Seq => (0..knn_graph.num as u32).collect_vec(),
+        Traversal::Bfs => bfs::generate_bfs(&knn_graph.final_graph)
+            .into_iter()
+            .map(|x| x as u32)
+            .collect_vec(),
+        Traversal::Dfs => generate_dfs(&knn_graph.final_graph)
+            .into_iter()
+            .map(|x| x as u32)
+            .collect_vec(),
+        Traversal::Bdfs => bdfs::generate_bdfs(&knn_graph.final_graph, 8)
+            .into_iter()
+            .map(|x| x as u32)
+            .collect_vec(),
+    };
+    let thread_pool = ThreadPoolBuilder::new().num_threads(80).build().unwrap();
+
+    let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * r];
+    thread_pool.install(|| {
+        let now = Instant::now();
+        index_nsg.build(
+            &traversal,
+            &mut cut_graph,
+            center_point_id,
+            sync,
+            true,
+            None,
+            limit,
+        );
+
+        black_box(cut_graph);
+
+        let elapsed = now.elapsed();
+        let secs = elapsed.as_secs_f64();
+        info!("{}", secs);
+    });
+    let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * r];
+    thread_pool.install(|| {
+        let now = Instant::now();
+        index_nsg.build(
+            &traversal,
+            &mut cut_graph,
+            center_point_id,
+            sync,
+            true,
+            None,
+            limit,
+        );
+
+        black_box(cut_graph);
+
+        let elapsed = now.elapsed();
+        let secs = elapsed.as_secs_f64();
+        info!("{}", secs);
+    });
+}
+
+pub fn bench_build_index_limited(
+    limit: usize,
+    r: usize,
+    l: usize,
+    c: usize,
+    knn_path: &Path,
+    f_vec_path: &Path,
+    result_path: &Path,
+    sync: bool,
+) {
+    let knn_graph = knn_graph::KnnGraph::from_file(knn_path);
+    let fvec = fvec::Fvec::from_file(f_vec_path);
+    let index_nsg = IndexNsg::new(&knn_graph, &fvec, l, r, c);
+    let center_point_id = index_nsg.build_center_point();
+    let traversals = [
+        ("sequential_cold1", (0..knn_graph.num as u32).collect_vec()),
+        ("sequential_cold2", (0..knn_graph.num as u32).collect_vec()),
+        ("sequential_cold3", (0..knn_graph.num as u32).collect_vec()),
+        ("sequential_hot", (0..knn_graph.num as u32).collect_vec()),
+        (
+            "bfs",
+            bfs::generate_bfs(&knn_graph.final_graph)
+                .into_iter()
+                .map(|x| x as u32)
+                .collect_vec(),
+        ),
+        (
+            "dfs",
+            generate_dfs(&knn_graph.final_graph)
+                .into_iter()
+                .map(|x| x as u32)
+                .collect_vec(),
+        ),
+        // (
+        //     "bdfs-4",
+        //     bdfs::generate_bdfs(&knn_graph.final_graph, 4)
+        //         .into_iter()
+        //         .map(|x| x as u32)
+        //         .collect_vec(),
+        // ),
+        (
+            "bdfs-8",
+            bdfs::generate_bdfs(&knn_graph.final_graph, 8)
+                .into_iter()
+                .map(|x| x as u32)
+                .collect_vec(),
+        ),
+        // (
+        //     "bdfs-16",
+        //     bdfs::generate_bdfs(&knn_graph.final_graph, 16)
+        //         .into_iter()
+        //         .map(|x| x as u32)
+        //         .collect_vec(),
+        // ),
+    ];
+    let mut all_results = vec![];
+    for num_thread in [80] {
+        let thread_pool = ThreadPoolBuilder::new()
+            .num_threads(num_thread)
+            .build()
+            .unwrap();
+        for (name, traversal) in &traversals {
+            // info!("runing async: {} {}", name, num_thread);
+            // let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * r];
+            // let now = Instant::now();
+            // // run sequential twice
+            // thread_pool.install(|| {
+            //     index_nsg.build(
+            //         &traversal,
+            //         &mut cut_graph,
+            //         center_point_id,
+            //         sync,
+            //         false,
+            //         None,
+            //     );
+            // });
+            // black_box(cut_graph);
+            // let elapsed = now.elapsed();
+            // let secs = elapsed.as_secs();
+            // info!("{} {} {}", secs, name, num_thread);
+            // all_results.push(Report {
+            //     time: secs,
+            //     traversal: name,
+            //     num_thread,
+            //     old: false,
+            //     barrial: None,
+            // });
+            // run the old
+            let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * r];
+
+            thread_pool.install(|| {
+                info!("runing async: {} {}, OLD impl", name, num_thread,);
+                let now = Instant::now();
+                index_nsg.build_async_no_barriar_old(
+                    &traversal,
+                    &mut cut_graph,
+                    center_point_id,
+                    Some(limit),
+                );
+
+                black_box(cut_graph);
+
+                let elapsed = now.elapsed();
+                let secs = elapsed.as_secs_f64();
+                info!("{} {} {}", secs, name, num_thread);
+                all_results.push(Report {
+                    time: secs,
+                    traversal: name,
+                    num_thread,
+                    old: true,
+                    barrial: None,
+                });
+            });
+            for barrier in [] {
+                info!(
+                    "runing async: {} {}, barrier: {}",
+                    name, num_thread, barrier
+                );
+                let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * r];
+                let now = Instant::now();
+                thread_pool.install(|| {
+                    index_nsg.build(
+                        &traversal,
+                        &mut cut_graph,
+                        center_point_id,
+                        sync,
+                        false,
+                        Some(barrier),
+                        Some(limit),
+                    );
+                });
+                black_box(cut_graph);
+                let elapsed = now.elapsed();
+                let secs = elapsed.as_secs_f64();
+                info!("{} {} {}", secs, name, num_thread);
+                all_results.push(Report {
+                    time: secs,
+                    traversal: name,
+                    num_thread,
+                    old: false,
+                    barrial: Some(barrier),
+                });
+            }
+        }
+    }
+    let writer = BufWriter::new(File::create(result_path).unwrap());
+    serde_json::to_writer(writer, &all_results).unwrap();
+}
+
 pub fn bench_build_index(
     r: usize,
     l: usize,
@@ -57,7 +351,9 @@ pub fn bench_build_index(
     let index_nsg = IndexNsg::new(&knn_graph, &fvec, l, r, c);
     let center_point_id = index_nsg.build_center_point();
     let traversals = [
-        ("sequential_cold", (0..knn_graph.num as u32).collect_vec()),
+        ("sequential_cold1", (0..knn_graph.num as u32).collect_vec()),
+        ("sequential_cold2", (0..knn_graph.num as u32).collect_vec()),
+        ("sequential_cold3", (0..knn_graph.num as u32).collect_vec()),
         ("sequential_hot", (0..knn_graph.num as u32).collect_vec()),
         (
             "bfs",
@@ -140,12 +436,13 @@ pub fn bench_build_index(
                     sync,
                     true,
                     None,
+                    None,
                 );
 
                 black_box(cut_graph);
 
                 let elapsed = now.elapsed();
-                let secs = elapsed.as_secs();
+                let secs = elapsed.as_secs_f64();
                 info!("{} {} {}", secs, name, num_thread);
                 all_results.push(Report {
                     time: secs,
@@ -170,11 +467,12 @@ pub fn bench_build_index(
                         sync,
                         false,
                         Some(barrier),
+                        None,
                     );
                 });
                 black_box(cut_graph);
                 let elapsed = now.elapsed();
-                let secs = elapsed.as_secs();
+                let secs = elapsed.as_secs_f64();
                 info!("{} {} {}", secs, name, num_thread);
                 all_results.push(Report {
                     time: secs,
@@ -199,6 +497,17 @@ pub fn bench_build_index_async(
 ) {
     bench_build_index(r, l, c, knn_path, f_vec_path, result_path, false)
 }
+pub fn bench_build_index_async_limited(
+    limit: usize,
+    r: usize,
+    l: usize,
+    c: usize,
+    knn_path: &Path,
+    f_vec_path: &Path,
+    result_path: &Path,
+) {
+    bench_build_index_limited(limit, r, l, c, knn_path, f_vec_path, result_path, false)
+}
 
 #[no_mangle]
 pub extern "C" fn rust_lib_helloworld() {
@@ -212,7 +521,6 @@ pub extern "C" fn build_traversal_seqence(name: *const c_char) -> *const *const 
     let file_name = Path::new(c_str.to_str().unwrap());
     let index_nsg = KnnGraph::from_file(file_name);
     let sequenctial = (0..index_nsg.final_graph.len()).collect::<Vec<_>>();
-    use rayon::prelude::*;
     let bfs: Vec<usize> = bfs::generate_bfs(&index_nsg.final_graph);
     let dfs = dfs::generate_dfs(&index_nsg.final_graph);
     let bdfs_4 = bdfs::generate_bdfs(&index_nsg.final_graph, 4);

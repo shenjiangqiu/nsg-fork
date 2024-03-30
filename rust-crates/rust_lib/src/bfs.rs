@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
 
+use tracing::{info, warn};
+
 pub fn generate_bfs(knn_graph: &Vec<Vec<u32>>) -> Vec<usize> {
+    info!("start to generate bfs");
     let total_nodes = knn_graph.len();
     let mut visited_nodes_count = 0;
     let mut visited = vec![false; knn_graph.len()];
@@ -30,12 +33,14 @@ pub fn generate_bfs(knn_graph: &Vec<Vec<u32>>) -> Vec<usize> {
         if visited_nodes_count == total_nodes {
             break;
         }
+        warn!("bfs not finished, finding a new start node");
         // find a node not visited
         let unvisited = visited.iter().position(|&v| !v).unwrap();
         working_queue.push_back(unvisited);
         visited[unvisited] = true;
         visited_nodes_count += 1;
     }
+    info!("bfs generated");
     nodes_to_visite
 }
 

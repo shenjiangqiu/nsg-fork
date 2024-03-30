@@ -22,33 +22,45 @@ impl KnnGraph {
         }
     }
     pub fn from_file(filename: &Path) -> Self {
+        Self::try_from_file(filename).unwrap()
+    }
+    pub fn try_from_file(filename: &Path) -> eyre::Result<Self> {
         let mut final_graph = vec![];
-        let mut file = File::open(filename).unwrap();
+        let mut file = File::open(filename)?;
         let mut k = [0u8; 4];
-        file.read_exact(&mut k).unwrap();
+        file.read_exact(&mut k)?;
         let k = u32::from_le_bytes(k);
         info!("k: {}", k);
-        file.seek(SeekFrom::End(0)).unwrap();
-        let fsize = file.stream_position().unwrap() as usize;
+        file.seek(SeekFrom::End(0))?;
+        let fsize = file.stream_position()? as usize;
         let num = fsize / ((k as usize + 1) * 4);
         info!("num: {}", num);
         final_graph.reserve(num);
-        file.seek(SeekFrom::Start(0)).unwrap();
+        file.seek(SeekFrom::Start(0))?;
         for _ in 0..num {
-            file.seek(SeekFrom::Current(4)).unwrap();
+            file.seek(SeekFrom::Current(4))?;
             let mut buffer = vec![0u32; k as usize];
             let mut bytes = vec![0u8; k as usize * 4];
-            file.read_exact(&mut bytes).unwrap();
+            file.read_exact(&mut bytes)?;
             for (i, chunk) in bytes.chunks_exact(4).enumerate() {
-                buffer[i] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                let node_id = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                if node_id >= num as u32 {
+                    return Err(eyre::eyre!(
+                        "node_id: {},but num is {}, i: {}",
+                        node_id,
+                        num,
+                        i
+                    ));
+                }
+                buffer[i] = node_id;
             }
             final_graph.push(buffer);
         }
-        Self {
+        Ok(Self {
             final_graph,
             num,
             k: k as usize,
-        }
+        })
     }
 }
 

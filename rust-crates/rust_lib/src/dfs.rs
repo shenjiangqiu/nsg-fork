@@ -1,4 +1,7 @@
+use tracing::{info, warn};
+
 pub fn generate_dfs(knn_graph: &Vec<Vec<u32>>) -> Vec<usize> {
+    info!("start to generate dfs");
     let total_nodes = knn_graph.len();
     let mut visited_nodes_count = 0;
     let mut visited = vec![false; knn_graph.len()];
@@ -28,11 +31,13 @@ pub fn generate_dfs(knn_graph: &Vec<Vec<u32>>) -> Vec<usize> {
             break;
         }
         // find a node not visited
+        warn!("dfs not finished, finding a new start node");
         let unvisited = visited.iter().position(|&v| !v).unwrap();
         working_stack.push(unvisited);
         visited[unvisited] = true;
         visited_nodes_count += 1;
     }
+    info!("dfs generated");
     nodes_to_visite
 }
 

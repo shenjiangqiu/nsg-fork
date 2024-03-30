@@ -1,8 +1,13 @@
-use std::cell::RefCell;
+use std::{
+    cell::RefCell,
+    collections::{BTreeSet, VecDeque},
+};
 
 use bitvec::{bitvec, vec::BitVec};
 use itertools::Itertools;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 #[cfg(not(feature = "avx512"))]
 use crate::distance::L2Distance as DistanceImpl;
@@ -28,7 +33,11 @@ struct RawCutNeighbor {
 
 unsafe impl Sync for RawCutNeighbor {}
 unsafe impl Send for RawCutNeighbor {}
-
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct CacheResult {
+    pub total: usize,
+    pub misses: usize,
+}
 impl<'a, 'b> IndexNsg<'a, 'b> {
     pub fn new(knn_graph: &'a KnnGraph, fvec: &'b Fvec, l: usize, r: usize, c: usize) -> Self {
         assert_eq!(fvec.num, knn_graph.num);
@@ -48,20 +57,107 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
         _sync: bool,
         old: bool,
         barrier: Option<usize>,
+        limit: Option<usize>,
     ) {
         if old {
-            self.build_async_no_barriar_old(traversal_ordering, cut_graph, center_point_id);
+            self.build_async_no_barriar_old(traversal_ordering, cut_graph, center_point_id, limit);
         } else if let Some(barrier) = barrier {
-            self.build_async(traversal_ordering, cut_graph, center_point_id, barrier);
+            self.build_async(
+                traversal_ordering,
+                cut_graph,
+                center_point_id,
+                barrier,
+                limit,
+            );
         } else {
-            self.build_async_no_barriar(traversal_ordering, cut_graph, center_point_id);
+            self.build_async_no_barriar(traversal_ordering, cut_graph, center_point_id, limit);
         }
+    }
+    pub fn analyze_cache(
+        &self,
+        traversal_ordering: &[u32],
+        center_point_id: u32,
+        limit: Option<usize>,
+    ) -> Vec<CacheResult> {
+        use rayon::prelude::*;
+        let limit = limit.unwrap_or(traversal_ordering.len());
+        let result: Vec<_> = traversal_ordering
+            .into_par_iter()
+            .take(limit)
+            .enumerate()
+            .map(|(_idx, node_id)| {
+                let mut full_set = Vec::with_capacity(4096);
+                let mut ret_set = Vec::with_capacity(self.l + 1);
+                let mut flags = BitVec::with_capacity(self.knn_graph.num);
+
+                flags.resize(self.knn_graph.num, false);
+
+                self.get_neighbors(
+                    center_point_id as usize,
+                    self.fvec.get_node(*node_id as usize),
+                    &mut full_set,
+                    &mut ret_set,
+                    &mut flags,
+                    self.l,
+                );
+                full_set.into_iter().map(|n| n.id).collect::<BTreeSet<_>>()
+            })
+            .collect();
+
+        let result = result.into_iter().fold(
+            {
+                let history = VecDeque::with_capacity(80);
+                let results = vec![CacheResult::default(); 80];
+                (history, results)
+            },
+            |(mut history, mut r), b| {
+                // update result
+                let mut current_miss = b.clone();
+                let mut current_results = vec![];
+                let total = current_miss.len();
+                debug!("currnet b: {:?}", b);
+                for h in history.iter().rev() {
+                    let updated_miss = current_miss
+                        .difference(&h)
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
+                    debug!("after history: {:?}", updated_miss);
+                    current_results.push(CacheResult {
+                        total,
+                        misses: updated_miss.len(),
+                    });
+                    current_miss = updated_miss;
+                }
+                while current_results.len() < 80 {
+                    current_results.push(CacheResult {
+                        total,
+                        misses: current_miss.len(),
+                    });
+                }
+
+                //update result
+                assert_eq!(r.len(), current_results.len());
+                for (r, c) in r.iter_mut().zip(current_results) {
+                    r.total += c.total;
+                    r.misses += c.misses;
+                }
+                // update history
+
+                if history.len() >= 80 {
+                    history.pop_front();
+                }
+                history.push_back(b);
+                (history, r)
+            },
+        );
+        result.1
     }
     pub fn build_async_no_barriar_old(
         &self,
         traversal_ordering: &[u32],
         cut_graph: &mut Vec<SimpleNeighbor>,
         center_point_id: u32,
+        limit: Option<usize>,
     ) {
         use rayon::prelude::*;
         // let current_threads = rayon::current_num_threads();
@@ -70,8 +166,10 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
         thread_local! {
             static STORE: RefCell<Option<(Vec<Neighbor>,Vec<Neighbor>,BitVec)>> = RefCell::new(None);
         };
+        let limit = limit.unwrap_or(traversal_ordering.len());
         tasks
             .into_iter()
+            .take(limit)
             .enumerate()
             .par_bridge()
             .for_each(|(_index, (cut, node_id))| {
@@ -108,6 +206,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
         traversal_ordering: &[u32],
         cut_graph: &mut Vec<SimpleNeighbor>,
         center_point_id: u32,
+        limit: Option<usize>,
     ) {
         use rayon::prelude::*;
         let num_nodes = traversal_ordering.len();
@@ -132,6 +231,11 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
             let mut current_raw_cut_graph = unsafe { raw_cut_graph.point.add(thread_idx * self.r) };
 
             while current_idx < num_nodes {
+                if let Some(limit) = limit {
+                    if current_idx >= limit {
+                        return;
+                    }
+                }
                 let node_id = unsafe { traversal_ordering.get_unchecked(current_idx) };
                 self.get_neighbors(
                     center_point_id as usize,
@@ -164,6 +268,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
         cut_graph: &mut Vec<SimpleNeighbor>,
         center_point_id: u32,
         barrier_gap: usize,
+        limit: Option<usize>,
     ) {
         use rayon::prelude::*;
         let num_nodes = traversal_ordering.len();
@@ -189,7 +294,13 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
             let mut current_raw_cut_graph = unsafe { raw_cut_graph.point.add(thread_idx * self.r) };
             let num_rounds = num_nodes / num_threads;
             let mut current_rounds = 0;
+
             while current_idx < num_nodes {
+                if let Some(limit) = limit {
+                    if current_idx >= limit {
+                        return;
+                    }
+                }
                 let node_id = unsafe { traversal_ordering.get_unchecked(current_idx) };
                 self.get_neighbors(
                     center_point_id as usize,
@@ -673,7 +784,12 @@ mod tests {
         let mut cut_graph = vec![SimpleNeighbor::default(); knn_graph.num * 2];
         let thread_pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
         thread_pool.install(|| {
-            index_nsg.build_async_no_barriar(&traversal_ordering, &mut cut_graph, center_point);
+            index_nsg.build_async_no_barriar(
+                &traversal_ordering,
+                &mut cut_graph,
+                center_point,
+                None,
+            );
         });
         info!("{:?}", cut_graph.len());
         info!("{:?}", cut_graph);
@@ -694,5 +810,24 @@ mod tests {
                 info!("sleep 1s: {}", index);
             });
         })
+    }
+
+    #[test]
+    fn test_analyze_cache() {
+        init_logger_debug();
+        let final_graph = build_final_graph();
+        info!("{:?}", final_graph);
+        let knn_graph = KnnGraph::new(final_graph);
+
+        let data = build_data();
+        info!("{:?}", data);
+        let f_vec = Fvec::new(16, 16, data);
+        let index_nsg = IndexNsg::new(&knn_graph, &f_vec, 2, 2, 4);
+        let center_point = index_nsg.build_center_point();
+        info!("center: {:?}", center_point);
+        let traversal_ordering = (0u32..knn_graph.num as u32).collect_vec();
+
+        let result = index_nsg.analyze_cache(&traversal_ordering, center_point, None);
+        info!("{:?}", result);
     }
 }
