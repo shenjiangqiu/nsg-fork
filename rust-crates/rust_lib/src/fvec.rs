@@ -38,7 +38,10 @@ impl Fvec {
 
             for (i, chunk) in bytes.chunks_exact(4).enumerate() {
                 buffer[i] = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                // check the correctness of the fvec file
+                assert!(buffer[i].is_finite());
             }
+
             data.extend(buffer);
         }
         Self {

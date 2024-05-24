@@ -15,6 +15,7 @@ use crate::distance::L2Distance as DistanceImpl;
 use crate::distance::L2DistanceAvx512 as DistanceImpl;
 
 use crate::{distance::DistanceTrait, fvec::Fvec, knn_graph::KnnGraph, Neighbor, SimpleNeighbor};
+pub const HISTORY_SIZE: usize = 14;
 
 #[allow(unused)]
 pub struct IndexNsg<'a, 'b> {
@@ -37,6 +38,10 @@ unsafe impl Send for RawCutNeighbor {}
 pub struct CacheResult {
     pub total: usize,
     pub misses: usize,
+}
+
+pub struct SimResult {
+    pub num_jumps: usize,
 }
 impl<'a, 'b> IndexNsg<'a, 'b> {
     pub fn new(knn_graph: &'a KnnGraph, fvec: &'b Fvec, l: usize, r: usize, c: usize) -> Self {
@@ -73,12 +78,13 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
             self.build_async_no_barriar(traversal_ordering, cut_graph, center_point_id, limit);
         }
     }
+
     pub fn analyze_cache(
         &self,
         traversal_ordering: &[u32],
         center_point_id: u32,
         limit: Option<usize>,
-    ) -> Vec<CacheResult> {
+    ) -> (Vec<CacheResult>, usize) {
         use rayon::prelude::*;
         let limit = limit.unwrap_or(traversal_ordering.len());
         let result: Vec<_> = traversal_ordering
@@ -92,7 +98,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
 
                 flags.resize(self.knn_graph.num, false);
 
-                self.get_neighbors(
+                let sim_result = self.get_neighbors_sim(
                     center_point_id as usize,
                     self.fvec.get_node(*node_id as usize),
                     &mut full_set,
@@ -100,18 +106,32 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                     &mut flags,
                     self.l,
                 );
-                full_set.into_iter().map(|n| n.id).collect::<BTreeSet<_>>()
+                (
+                    full_set.into_iter().map(|n| n.id).collect::<BTreeSet<_>>(),
+                    sim_result,
+                )
             })
             .collect();
-
-        let result = result.into_iter().fold(
+        let result_len = result.len();
+        let result = result.into_iter().enumerate().fold(
             {
-                let history = VecDeque::with_capacity(80);
-                let results = vec![CacheResult::default(); 80];
-                (history, results)
+                let history = VecDeque::with_capacity(HISTORY_SIZE);
+                let results = vec![CacheResult::default(); HISTORY_SIZE];
+                let previouse = None;
+                let total_jump_dir = 0;
+                (history, results, previouse, total_jump_dir)
             },
-            |(mut history, mut r), b| {
+            |(mut history, mut r, prev_jump, mut total_jump_div), (index, (b, sim_result))| {
+                // update the jump
+                // let prev_jump = prev_jump.unwrap_or(sim_result.num_jumps);
+                // total_jump_div +=
+                //     (sim_result.num_jumps as isize - prev_jump as isize).abs() as usize;
+                if let Some(prev_jump) = prev_jump {
+                    total_jump_div +=
+                        (sim_result.num_jumps as isize - prev_jump as isize).abs() as usize;
+                }
                 // update result
+                debug!("{}/{}", index, result_len);
                 let mut current_miss = b.clone();
                 let mut current_results = vec![];
                 let total = current_miss.len();
@@ -128,7 +148,7 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                     });
                     current_miss = updated_miss;
                 }
-                while current_results.len() < 80 {
+                while current_results.len() < HISTORY_SIZE {
                     current_results.push(CacheResult {
                         total,
                         misses: current_miss.len(),
@@ -143,14 +163,16 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
                 }
                 // update history
 
-                if history.len() >= 80 {
+                if history.len() >= HISTORY_SIZE {
                     history.pop_front();
                 }
                 history.push_back(b);
-                (history, r)
+                (history, r, Some(sim_result.num_jumps), total_jump_div)
             },
         );
-        result.1
+        let cache_result = result.1;
+        let jump_div = result.3;
+        (cache_result, jump_div)
     }
     pub fn build_async_no_barriar_old(
         &self,
@@ -457,6 +479,101 @@ impl<'a, 'b> IndexNsg<'a, 'b> {
         let center_node = ret_set[0].id;
         // let center_point = self.knn_graph.get_neighbors(&center_f);
         center_node
+    }
+    /// return ret_set,full_set
+    /// this is the simversion, should not be used for performance test
+    #[allow(unused)]
+    pub fn get_neighbors_sim(
+        &self,
+        start: usize,
+        target_node: &[f32],
+        full_set: &mut Vec<Neighbor>,
+        ret_set: &mut Vec<Neighbor>,
+        flags: &mut BitVec,
+        l: usize,
+    ) -> SimResult {
+        let mut init_ids = Vec::with_capacity(l);
+        let mut knn_index = 0;
+        for (neighber_id, index) in unsafe { self.knn_graph.final_graph.get_unchecked(start) }
+            .iter()
+            .zip(0..l)
+        {
+            init_ids.push(*neighber_id);
+            flags.set(*neighber_id as usize, true);
+        }
+        let mut total_jumps = 0;
+        while init_ids.len() < l {
+            let mut gen = rand::thread_rng();
+
+            let id = gen.gen_range(0..self.knn_graph.num);
+            if unsafe { *flags.get_unchecked(id) } {
+                continue;
+            }
+            init_ids.push(id as u32);
+            flags.set(id, true);
+        }
+        for id in init_ids {
+            let left_f = self.fvec.get_node(id as usize);
+            let distance = DistanceImpl::distance(target_node, left_f);
+            full_set.push(Neighbor {
+                id,
+                distance,
+                flag: true,
+            });
+            ret_set.push(Neighbor {
+                id,
+                distance,
+                flag: true,
+            });
+        }
+        ret_set.sort_by(|x, y| x.distance.total_cmp(&y.distance));
+
+        let mut k = 0;
+        while k < l {
+            // new_k, the new k for next step, will be set if a new neighor inserted into the retset
+            let mut nk = l;
+            // test k's neighbor, add them into retset
+
+            if unsafe { ret_set.get_unchecked(k) }.flag {
+                total_jumps += 1;
+                unsafe { ret_set.get_unchecked_mut(k) }.flag = false;
+                for neigber in unsafe {
+                    self.knn_graph
+                        .final_graph
+                        .get_unchecked(unsafe { ret_set.get_unchecked(k) }.id as usize)
+                }
+                .iter()
+                {
+                    if unsafe { *flags.get_unchecked(*neigber as usize) } {
+                        continue;
+                    }
+                    flags.set(*neigber as usize, true);
+                    let left_f = self.fvec.get_node(*neigber as usize);
+                    let distance = DistanceImpl::distance(target_node, left_f);
+                    full_set.push(Neighbor {
+                        id: *neigber,
+                        distance,
+                        flag: true,
+                    });
+                    if distance < unsafe { ret_set.get_unchecked(l - 1).distance } {
+                        // insert it !
+                        let mut i = l - 2;
+                        let insertd_place = binary_search_insert(ret_set, *neigber, distance);
+                        if insertd_place < nk {
+                            nk = insertd_place;
+                        }
+                    }
+                }
+            }
+            if nk <= k {
+                k = nk;
+            } else {
+                k += 1;
+            }
+        }
+        return SimResult {
+            num_jumps: total_jumps,
+        };
     }
 
     /// return ret_set,full_set

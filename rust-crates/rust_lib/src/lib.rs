@@ -30,6 +30,7 @@ pub struct CacheReport {
     pub result: Vec<CacheResult>,
     pub traversal: String,
     pub limit: Option<usize>,
+    pub jump_divs: usize,
 }
 #[derive(Serialize, Deserialize, Debug)]
 struct Report<'a> {
@@ -105,11 +106,13 @@ pub fn analyze_cache(
         for (name, traversal) in &traversals {
             thread_pool.install(|| {
                 info!("runing async: {} {}, OLD impl", name, num_thread,);
-                let result = index_nsg.analyze_cache(&traversal, center_point_id, limit);
+                let (result, jump_div) =
+                    index_nsg.analyze_cache(&traversal, center_point_id, limit);
                 all_results.push(CacheReport {
                     traversal: name.to_string(),
                     result,
                     limit,
+                    jump_divs: jump_div,
                 });
             });
         }

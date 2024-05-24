@@ -10,7 +10,8 @@
 #include <cstddef>
 #include <vector>
 #include <mutex>
-
+#include <efanna2e/util.h>
+#include <random>
 namespace efanna2e {
 
 struct Neighbor {
@@ -41,7 +42,7 @@ struct nhood{
   nhood(unsigned l, unsigned s, std::mt19937 &rng, unsigned N){
     M = s;
     nn_new.resize(s * 2);
-    GenRandom(rng, &nn_new[0], (unsigned)nn_new.size(), N);
+    efanna2e::GenRandom(rng, &nn_new[0], (unsigned)nn_new.size(), N);
     nn_new.reserve(s * 2);
     pool.reserve(l);
   }

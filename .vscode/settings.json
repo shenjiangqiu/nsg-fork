@@ -69,9 +69,20 @@
         "variant": "cpp",
         "semaphore": "cpp",
         "__nullptr": "cpp",
-        "__string": "cpp"
+        "__string": "cpp",
+        "regex": "cpp",
+        "__hash_table": "cpp",
+        "__split_buffer": "cpp",
+        "__tree": "cpp",
+        "queue": "cpp",
+        "stack": "cpp",
+        "unordered_set": "cpp",
+        "filesystem": "cpp"
     },
     "git.ignoreLimitWarning": true,
     "C_Cpp.default.compilerPath": "/usr/bin/g++",
-    "rust-analyzer.cargo.features": ["avx512"]
+    "rust-analyzer.cargo.features": [
+        "avx512"
+    ],
+    "editor.tabSize": 2
 }

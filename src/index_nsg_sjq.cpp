@@ -9,28 +9,32 @@
 #include "efanna2e/exceptions.h"
 #include "efanna2e/parameters.h"
 // #include <efanna2e/avx512.h>
+#include <condition_variable>
 #include <efanna2e/avx256.h>
-namespace efanna2e {
+#include <efanna2e/index_nsg_sjq.h>
+#include <functional>
+#include <mutex>
+#include <queue>
+#include <thread>
+namespace sjq {
 #define _CONTROL_NUM 100
 
 IndexNSG::IndexNSG(const size_t dimension, const size_t n, Metric m,
-                   Index *initializer)
-    : Index(dimension, n, m), initializer_{initializer} {}
+                   std::unique_ptr<Index> &&initializer)
+    : initializer_(std::move(initializer)), dimension_(dimension), nd_(n),
+      has_built(false) {
 
-IndexNSG::~IndexNSG() {
-  if (distance_ != nullptr) {
-    delete distance_;
-    distance_ = nullptr;
-  }
-  if (initializer_ != nullptr) {
-    delete initializer_;
-    initializer_ = nullptr;
-  }
-  if (opt_graph_ != nullptr) {
-    delete opt_graph_;
-    opt_graph_ = nullptr;
+  switch (m) {
+  case L2:
+    distance_ = std::unique_ptr<DistanceL2>(new DistanceL2());
+    break;
+  default:
+    distance_ = std::unique_ptr<DistanceL2>(new DistanceL2());
+    break;
   }
 }
+
+IndexNSG::~IndexNSG() {}
 
 void IndexNSG::Save(const char *filename) {
   std::ofstream out(filename, std::ios::binary | std::ios::out);
@@ -87,7 +91,7 @@ void IndexNSG::Load_nn_graph(const char *filename) {
     final_graph_[i].resize(k);
     final_graph_[i].reserve(kk);
     in.read((char *)final_graph_[i].data(), k * sizeof(unsigned));
-    if (i==0) {
+    if (i == 0) {
       for (int j = 0; j < 10; j++) {
         std::cout << "final_graph_[0]: " << final_graph_[0][j] << std::endl;
       }
@@ -450,8 +454,20 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   unsigned step_size = nd_/percent;
   std::mutex progress_lock;
   */
-  unsigned range = parameters.Get<unsigned>("R");
-  std::vector<std::mutex> locks(nd_);
+  // unsigned range = parameters.Get<unsigned>("R");
+  // std::vector<std::mutex> locks(nd_);
+  unsigned threads = parameters.Get<unsigned>("T");
+  std::vector<std::thread> thread_pool;
+  for (unsigned t = 0; t < threads; t++) {
+    thread_pool.push_back(
+        std::thread([this, t, threads, cut_graph_, parameters]() {
+          unsigned start = (nd_ / threads) * t;
+          unsigned end = (t == threads - 1) ? nd_ : (nd_ / threads) * (t + 1);
+          for (unsigned n = start; n < end; ++n) {
+            // InterInsert(n, width, cut_graph_);
+          }
+        }));
+  }
 
 #pragma omp parallel
   {
@@ -613,16 +629,16 @@ void IndexNSG::SearchWithOptGraph(const float *query, size_t K,
                                   const Parameters &parameters,
                                   unsigned *indices) {
   unsigned L = parameters.Get<unsigned>("L_search");
-  DistanceFastL2 *dist_fast = (DistanceFastL2 *)distance_;
+  DistanceFastL2 *dist_fast = (DistanceFastL2 *)distance_.get();
 
   std::vector<Neighbor> retset(L + 1);
   std::vector<unsigned> init_ids(L);
   // std::mt19937 rng(rand());
   // GenRandom(rng, init_ids.data(), L, (unsigned) nd_);
-
+  char *opt_graph = opt_graph_.get();
   boost::dynamic_bitset<> flags{nd_, 0};
   unsigned tmp_l = 0;
-  unsigned *neighbors = (unsigned *)(opt_graph_ + node_size * ep_ + data_len);
+  unsigned *neighbors = (unsigned *)(opt_graph + node_size * ep_ + data_len);
   unsigned MaxM_ep = *neighbors;
   neighbors++;
 
@@ -644,14 +660,14 @@ void IndexNSG::SearchWithOptGraph(const float *query, size_t K,
     unsigned id = init_ids[i];
     if (id >= nd_)
       continue;
-    _mm_prefetch(opt_graph_ + node_size * id, _MM_HINT_T0);
+    _mm_prefetch(opt_graph + node_size * id, _MM_HINT_T0);
   }
   L = 0;
   for (unsigned i = 0; i < init_ids.size(); i++) {
     unsigned id = init_ids[i];
     if (id >= nd_)
       continue;
-    float *x = (float *)(opt_graph_ + node_size * id);
+    float *x = (float *)(opt_graph + node_size * id);
     float norm_x = *x;
     x++;
     float dist = dist_fast->compare(x, query, norm_x, (unsigned)dimension_);
@@ -670,18 +686,18 @@ void IndexNSG::SearchWithOptGraph(const float *query, size_t K,
       retset[k].flag = false;
       unsigned n = retset[k].id;
 
-      _mm_prefetch(opt_graph_ + node_size * n + data_len, _MM_HINT_T0);
-      unsigned *neighbors = (unsigned *)(opt_graph_ + node_size * n + data_len);
+      _mm_prefetch(opt_graph + node_size * n + data_len, _MM_HINT_T0);
+      unsigned *neighbors = (unsigned *)(opt_graph + node_size * n + data_len);
       unsigned MaxM = *neighbors;
       neighbors++;
       for (unsigned m = 0; m < MaxM; ++m)
-        _mm_prefetch(opt_graph_ + node_size * neighbors[m], _MM_HINT_T0);
+        _mm_prefetch(opt_graph + node_size * neighbors[m], _MM_HINT_T0);
       for (unsigned m = 0; m < MaxM; ++m) {
         unsigned id = neighbors[m];
         if (flags[id])
           continue;
         flags[id] = 1;
-        float *data = (float *)(opt_graph_ + node_size * id);
+        float *data = (float *)(opt_graph + node_size * id);
         float norm = *data;
         data++;
         float dist =
@@ -711,11 +727,13 @@ void IndexNSG::OptimizeGraph(float *data) { // use after build or load
   data_ = data;
   data_len = (dimension_ + 1) * sizeof(float);
   neighbor_len = (width + 1) * sizeof(unsigned);
+  DistanceFastL2 *dist_fast = (DistanceFastL2 *)distance_.get();
   node_size = data_len + neighbor_len;
-  opt_graph_ = (char *)malloc(node_size * nd_);
-  DistanceFastL2 *dist_fast = (DistanceFastL2 *)distance_;
+  if (opt_graph_ == nullptr) {
+    opt_graph_ = std::unique_ptr<char[]>(new char[node_size * nd_]);
+  }
   for (unsigned i = 0; i < nd_; i++) {
-    char *cur_node_offset = opt_graph_ + i * node_size;
+    char *cur_node_offset = opt_graph_.get() + i * node_size;
     float cur_norm = dist_fast->norm(data_ + i * dimension_, dimension_);
     std::memcpy(cur_node_offset, &cur_norm, sizeof(float));
     std::memcpy(cur_node_offset + sizeof(float), data_ + i * dimension_,
@@ -818,4 +836,4 @@ void IndexNSG::tree_grow(const Parameters &parameter) {
     }
   }
 }
-} // namespace efanna2e
+} // namespace sjq

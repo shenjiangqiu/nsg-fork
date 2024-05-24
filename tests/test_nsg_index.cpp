@@ -4,7 +4,7 @@
 
 #include <efanna2e/index_nsg.h>
 #include <efanna2e/util.h>
-#include "rust-lib.h"
+// #include "rust-lib.h"
 
 void load_data(char *filename, float *&data, unsigned &num,
                unsigned &dim)
@@ -61,22 +61,22 @@ int main(int argc, char **argv)
     std::cout << "size of dataset: " << sz << "\n";
     std::cout << "loading  traversal data"
               << "\n";
-    auto traversal_sequence = build_traversal_seqence(nn_graph_path.c_str());
+    // auto traversal_sequence = build_traversal_seqence(nn_graph_path.c_str());
     std::cout << "done, loading nn graph"
               << "\n";
     index.Load_nn_graph(nn_graph_path.c_str());
     std::cout << "done, start runing"
               << "\n";
     // for (unsigned threads = 64; threads >= 4; threads -= 4) {
-    for (unsigned traversal_idx = 0; traversal_idx < NUM_TRAVERSAL; traversal_idx++)
+    for (unsigned traversal_idx = 0; traversal_idx < 1; traversal_idx++)
     {
         std::cout << "traversal_idx: " << traversal_idx << "\n";
-        const unsigned long *trace = traversal_sequence[0];
+        // const unsigned long *trace = traversal_sequence[0];
         auto s = std::chrono::high_resolution_clock::now();
 
         // paras.Set<unsigned>("Threads", threads);
 
-        index.Build(points_num, data_load, paras, trace);
+        index.Build(points_num, data_load, paras, traversal_idx);
         auto e = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff = e - s;
 
