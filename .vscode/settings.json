@@ -77,7 +77,8 @@
         "queue": "cpp",
         "stack": "cpp",
         "unordered_set": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "barrier": "cpp"
     },
     "git.ignoreLimitWarning": true,
     "C_Cpp.default.compilerPath": "/usr/bin/g++",
