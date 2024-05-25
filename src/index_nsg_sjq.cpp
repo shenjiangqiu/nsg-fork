@@ -9,6 +9,7 @@
 #include "efanna2e/exceptions.h"
 #include "efanna2e/parameters.h"
 // #include <efanna2e/avx512.h>
+#include <atomic>
 #include <condition_variable>
 #include <efanna2e/avx256.h>
 #include <efanna2e/index_nsg_sjq.h>
@@ -16,6 +17,10 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+
+#include <efanna2e/bdfs.h>
+#include <efanna2e/bfs.h>
+#include <efanna2e/dfs.h>
 namespace sjq {
 #define _CONTROL_NUM 100
 
@@ -457,57 +462,155 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   // unsigned range = parameters.Get<unsigned>("R");
   // std::vector<std::mutex> locks(nd_);
   unsigned threads = parameters.Get<unsigned>("T");
-  std::vector<std::thread> thread_pool;
-  for (unsigned t = 0; t < threads; t++) {
-    thread_pool.push_back(
-        std::thread([this, t, threads, cut_graph_, parameters]() {
-          unsigned start = (nd_ / threads) * t;
-          unsigned end = (t == threads - 1) ? nd_ : (nd_ / threads) * (t + 1);
-          for (unsigned n = start; n < end; ++n) {
-            // InterInsert(n, width, cut_graph_);
-          }
-        }));
-  }
+  unsigned batch_size = parameters.Get<unsigned>("batchSize");
+  // set up a task queue
+  std::queue<std::pair<unsigned *, unsigned>> task_queue;
+  std::mutex task_queue_mutex;
+  std::condition_variable cv;
+  unsigned max_queue_size = 10;
+  std::thread producer;
 
-#pragma omp parallel
-  {
-    // unsigned cnt = 0;
-    std::vector<Neighbor> pool, tmp;
-    boost::dynamic_bitset<> flags{nd_, 0};
-#pragma omp for schedule(dynamic, 100)
-    for (unsigned n = 0; n < nd_; ++n) {
-      // unsigned n_index = traversal_sequence[n];
-      pool.clear();
-      tmp.clear();
-      flags.reset();
-      // from eq to query
-      get_neighbors(data_ + dimension_ * n, parameters, flags, tmp, pool);
-      // save the pool
+  switch (traversal_sequence) {
+  case 1:
+    // it's bfs
+    producer = std::thread([&] {
+      bfs bfs(nd_, dimension_);
+      while (true) {
+        auto buffer = new unsigned[batch_size * threads];
 
-      //      save_pool(n,pool);
-      sync_prune(n, pool, parameters, flags, cut_graph_);
-      /*
-    cnt++;
-    if(cnt % step_size == 0){
-      LockGuard g(progress_lock);
-      std::cout<<progress++ <<"/"<< percent << " completed" << std::endl;
+        std::cout << "Producer is producing tasks" << std::endl;
+        const auto count =
+            bfs.next(batch_size * threads, this->final_graph_, buffer);
+        // generating tasks
+        if (count == 0) {
+          std::cout << "Producer has finished" << std::endl;
+          break;
+        }
+        std::unique_lock<std::mutex> lock(task_queue_mutex);
+        cv.wait(lock, [&] { return task_queue.size() < max_queue_size; });
+        task_queue.push({buffer, count});
+        cv.notify_all();
       }
-      */
-    }
+    });
+    break;
+  case 2:
+    // it's dfs
+    producer = std::thread([&] {
+      dfs dfs(nd_, dimension_);
+      while (true) {
+        auto buffer = new unsigned[batch_size * threads];
+
+        std::cout << "Producer is producing tasks" << std::endl;
+        const auto count =
+            dfs.next(batch_size * threads, this->final_graph_, buffer);
+        // generating tasks
+        if (count == 0) {
+          std::cout << "Producer has finished" << std::endl;
+          break;
+        }
+        std::unique_lock<std::mutex> lock(task_queue_mutex);
+        cv.wait(lock, [&] { return task_queue.size() < max_queue_size; });
+        task_queue.push({buffer, count});
+        cv.notify_all();
+      }
+    });
+    break;
+  case 3:
+    // it's bdfs
+    producer = std::thread([&] {
+      bdfs bdfs(nd_, dimension_, 10, 50);
+      while (true) {
+        auto buffer = new unsigned[batch_size * threads];
+
+        std::cout << "Producer is producing tasks" << std::endl;
+        const auto count =
+            bdfs.next(batch_size * threads, this->final_graph_, buffer);
+        // generating tasks
+        if (count == 0) {
+          std::cout << "Producer has finished" << std::endl;
+          break;
+        }
+        std::unique_lock<std::mutex> lock(task_queue_mutex);
+        cv.wait(lock, [&] { return task_queue.size() < max_queue_size; });
+        task_queue.push({buffer, count});
+        cv.notify_all();
+      }
+    });
+    break;
+  default:
+    throw std::invalid_argument("Invalid traversal sequence");
+    break;
   }
 
-  //         for (unsigned batch_id = 0; batch_id < total_batch; batch_id++) {
-  //             const unsigned start = batch_id * num_threads;
-  //             unsigned end = (batch_id + 1) * num_threads;
-  //             if (end > nd_) {
-  //                 end = nd_;
-  //             }
-  // #pragma omp for schedule(static)
-  //             for (unsigned n = start; n < end; ++n) {
-  //                 unsigned n_index = traversal_sequence[n];
-  //                 InterInsert(n_index, range, locks, cut_graph_);
-  //             }
-  //         }
+  std::vector<std::thread> working_threads;
+  std::atomic_uint count_working(0);
+
+  std::atomic_uint finished(threads);
+  bool all_finished(true);
+
+  std::mutex all_finished_mutex;
+  std::condition_variable all_finished_cv;
+
+  for (unsigned tid = 0; tid < threads; tid++) {
+    working_threads.push_back(std::thread([&] {
+      std::cout << "working thread tid: " << tid << std::endl;
+      std::vector<Neighbor> pool, tmp;
+      boost::dynamic_bitset<> flags{nd_, 0};
+      while (true) {
+        std::unique_lock<std::mutex> lock(task_queue_mutex);
+        cv.wait(lock,
+                [&] { return !task_queue.empty() && finished == threads; });
+        auto [task, count] = task_queue.front();
+        count_working++;
+        unsigned real_batch_size = (count + threads - 1) / threads;
+        if (count_working == threads) {
+          std::cout << "All threads are working" << std::endl;
+          task_queue.pop();
+        }
+        lock.unlock();
+        std::cout << "TID: " << tid << " is processing a task" << std::endl;
+        // start processing the tasks
+        auto end_task = task + count;
+        auto my_task = task + tid * real_batch_size;
+        auto alter_size = end_task - my_task;
+        real_batch_size =
+            alter_size < real_batch_size ? alter_size : real_batch_size;
+        for (unsigned i = 0; i < real_batch_size; i++) {
+          unsigned n = my_task[i];
+          pool.clear();
+          tmp.clear();
+          flags.reset();
+
+          get_neighbors(data_ + dimension_ * n, parameters, flags, tmp, pool);
+          sync_prune(n, pool, parameters, flags, cut_graph_);
+        }
+
+        // finish the task
+        count_working--;
+        if (count_working == 0) {
+          delete[] task;
+          cv.notify_all();
+        }
+
+        std::unique_lock<std::mutex> lock_all_finished(all_finished_mutex);
+        finished++;
+        if (finished == threads) {
+          all_finished = true;
+          all_finished_cv.notify_all();
+        } else {
+          all_finished_cv.wait(lock_all_finished, [&] { return all_finished; });
+        }
+        lock_all_finished.unlock();
+      }
+    }));
+  }
+
+  // join the producer thread
+  producer.join();
+  // join the working threads
+  for (auto &thread : working_threads) {
+    thread.join();
+  }
 }
 
 void IndexNSG::Build(size_t n, const float *data, const Parameters &parameters,

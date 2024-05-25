@@ -1,4 +1,3 @@
-set(CMAKE_CXX_STANDARD 11)
 
 file(GLOB_RECURSE CPP_SOURCES *.cpp)
 

@@ -27,12 +27,14 @@ struct bdfs {
   /// @param total_nodes the number of nodes
   /// @param knn the number of neighbors
   /// @param max_depth the max depth
-  inline bdfs(const unsigned total_nodes, const unsigned knn, const unsigned max_depth,
-              const unsigned max_candiate_next)
+  inline bdfs(const unsigned total_nodes, const unsigned knn,
+              const unsigned max_depth, const unsigned max_candiate_next)
       : total_nodes(total_nodes), knn(knn), max_depth(max_depth),
         max_candiate_next(max_candiate_next), visited(total_nodes, false) {}
 
-  inline int next(const int size, const int *data, int *buffer);
+  inline unsigned next(const unsigned size,
+                       const std::vector<std::vector<unsigned>> &data,
+                       unsigned *buffer);
 };
 
 /// @brief  bdfs next
@@ -40,13 +42,15 @@ struct bdfs {
 /// @param data the graph data n * knn
 /// @param buffer the return buffer: size= size
 /// @return the real number of nodes generated
-inline int bdfs::next(const int size, const int *data, int *buffer) {
+inline unsigned bdfs::next(const unsigned size,
+                           const std::vector<std::vector<unsigned>> &data,
+                           unsigned *buffer) {
   // if all nodes are generated, return 0
   if (current_nodes >= total_nodes && working_stack.empty()) {
     return 0;
   }
 
-  int total_generated = 0;
+  unsigned total_generated = 0;
   while (total_generated < size) {
     // if the working queue is empty, generate a new node
     if (working_stack.empty()) {
@@ -87,9 +91,8 @@ inline int bdfs::next(const int size, const int *data, int *buffer) {
       // the size of depth 0;
       visited[selected] = true;
     }
-    unsigned current_node;
-    unsigned current_depth;
-    std::tie(current_node,current_depth) = working_stack.top();
+
+    const auto [current_node, current_depth] = working_stack.top();
     // get the current node
     working_stack.pop();
 
@@ -99,7 +102,7 @@ inline int bdfs::next(const int size, const int *data, int *buffer) {
       // add some to candidate next
       unsigned i = 0;
       while (i < knn && candidate_next.size() < (unsigned)max_candiate_next) {
-        int neighbor = data[current_node * knn + i];
+        int neighbor = data[current_node][i];
         if (!visited[neighbor]) {
           candidate_next.push_back(neighbor);
         }
@@ -109,7 +112,7 @@ inline int bdfs::next(const int size, const int *data, int *buffer) {
       // add to next depth
       // get the neighbors of the current node
       for (unsigned i = 0; i < knn; i++) {
-        int neighbor = data[current_node * knn + i];
+        int neighbor = data[current_node][i];
         // if the neighbor is not visited, add it to the working queue
         if (!visited[neighbor]) {
           working_stack.push({neighbor, current_depth + 1});

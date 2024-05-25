@@ -29,8 +29,9 @@ void load_data(char *filename, float *&data, unsigned &num,
 }
 
 int main(int argc, char **argv) {
-  if (argc != 7) {
-    std::cout << argv[0] << " data_file nn_graph_path L R C save_graph_file T"
+  if (argc != 9) {
+    std::cout << argv[0]
+              << " data_file nn_graph_path L R C save_graph_file T batchSize"
               << std::endl;
     exit(-1);
   }
@@ -43,16 +44,18 @@ int main(int argc, char **argv) {
   unsigned R = (unsigned)atoi(argv[4]);
   unsigned C = (unsigned)atoi(argv[5]);
   unsigned T = (unsigned)atoi(argv[7]);
+  unsigned batchSize = (unsigned)atoi(argv[8]);
   efanna2e::Parameters paras;
   paras.Set<unsigned>("L", L);
   paras.Set<unsigned>("R", R);
   paras.Set<unsigned>("C", C);
   paras.Set<unsigned>("T", T);
+  paras.Set<unsigned>("batchSize", batchSize);
   paras.Set<std::string>("nn_graph_path", nn_graph_path);
   // data_load = efanna2e::data_align(data_load, points_num, dim);//one must
   // align the data before build
   sjq::IndexNSG index(dim, points_num, efanna2e::L2, nullptr);
-  
+
   auto dm = index.GetDimension();
   auto sz = index.GetSizeOfDataset();
   std::cout << "dimension: " << dm << "\n";
@@ -63,7 +66,7 @@ int main(int argc, char **argv) {
   index.Load_nn_graph(nn_graph_path.c_str());
   std::cout << "done, start runing" << "\n";
   // for (unsigned threads = 64; threads >= 4; threads -= 4) {
-  for (unsigned traversal_idx = 0; traversal_idx < 1; traversal_idx++) {
+  for (unsigned traversal_idx = 1; traversal_idx < 2; traversal_idx++) {
     std::cout << "traversal_idx: " << traversal_idx << "\n";
     // const unsigned long *trace = traversal_sequence[0];
     auto s = std::chrono::high_resolution_clock::now();

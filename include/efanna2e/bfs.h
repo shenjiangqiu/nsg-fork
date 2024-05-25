@@ -8,30 +8,33 @@
 #include <vector>
 struct bfs {
 
-  int current_nodes = 0;
-  int total_nodes;
-  int knn;
+  unsigned current_nodes = 0;
+  const unsigned total_nodes;
+  const unsigned knn;
   std::vector<bool> visited;
-  std::queue<int> working_queue;
+  std::queue<unsigned> working_queue;
 
-  inline bfs(const int total_nodes, const int knn)
+  inline bfs(const unsigned total_nodes, const unsigned knn)
       : total_nodes(total_nodes), knn(knn), visited(total_nodes, false) {}
-  inline int next(const int size, const int *data, int *buffer);
+  inline unsigned next(const unsigned size,
+                       const std::vector<std::vector<unsigned>> &data,
+                       unsigned *buffer);
 };
-
 
 /// @brief  bfs next
 /// @param size the number of nodes to generate this call
 /// @param data the graph data n * knn
 /// @param buffer the return buffer: size= size
 /// @return the real number of nodes generated
-inline int bfs::next(const int size, const int *data, int *buffer) {
+inline unsigned bfs::next(const unsigned size,
+                          const std::vector<std::vector<unsigned>> &data,
+                          unsigned *buffer) {
   // if all nodes are generated, return 0
   if (current_nodes >= total_nodes && working_queue.empty()) {
     return 0;
   }
 
-  int total_generated = 0;
+  unsigned total_generated = 0;
   while (total_generated < size) {
     // if the working queue is empty, generate a new node
     if (working_queue.empty()) {
@@ -42,7 +45,7 @@ inline int bfs::next(const int size, const int *data, int *buffer) {
       // generate a new node
 
       // find the first unvisited node
-      while(visited[current_nodes] && current_nodes < total_nodes){
+      while (visited[current_nodes] && current_nodes < total_nodes) {
         current_nodes++;
       }
       // if all nodes are visited, return
@@ -58,8 +61,8 @@ inline int bfs::next(const int size, const int *data, int *buffer) {
     working_queue.pop();
     buffer[total_generated++] = current_node;
     // get the neighbors of the current node
-    for (int i = 0; i < knn; i++) {
-      int neighbor = data[current_node * knn + i];
+    for (unsigned i = 0; i < knn; i++) {
+      unsigned neighbor = data[current_node][i];
       // if the neighbor is not visited, add it to the working queue
       if (!visited[neighbor]) {
         working_queue.push(neighbor);

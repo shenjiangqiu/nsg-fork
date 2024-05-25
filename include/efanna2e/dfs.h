@@ -9,15 +9,16 @@
 #include <vector>
 struct dfs {
 
-  int current_nodes = 0;
-  int total_nodes;
-  int knn;
+  unsigned current_nodes = 0;
+  unsigned total_nodes;
+  unsigned knn;
   std::vector<bool> visited;
-  std::stack<int> working_stack;
+  std::stack<unsigned> working_stack;
 
-  inline dfs(const int total_nodes, const int knn)
+  inline dfs(const unsigned total_nodes, const unsigned knn)
       : total_nodes(total_nodes), knn(knn), visited(total_nodes, false) {}
-  inline int next(const int size, const int *data, int *buffer);
+  inline unsigned next(const unsigned size,
+                  const std::vector<std::vector<unsigned>> &data, unsigned *buffer);
 };
 
 /// @brief  bfs next
@@ -25,13 +26,15 @@ struct dfs {
 /// @param data the graph data n * knn
 /// @param buffer the return buffer: size= size
 /// @return the real number of nodes generated
-inline int dfs::next(const int size, const int *data, int *buffer) {
+inline unsigned dfs::next(const unsigned size,
+                     const std::vector<std::vector<unsigned>> &data,
+                     unsigned *buffer) {
   // if all nodes are generated, return 0
   if (current_nodes >= total_nodes && working_stack.empty()) {
     return 0;
   }
 
-  int total_generated = 0;
+  unsigned total_generated = 0;
   while (total_generated < size) {
     // if the working queue is empty, generate a new node
     if (working_stack.empty()) {
@@ -54,12 +57,12 @@ inline int dfs::next(const int size, const int *data, int *buffer) {
       current_nodes++;
     }
     // get the current node
-    int current_node = working_stack.top();
+    auto current_node = working_stack.top();
     working_stack.pop();
     buffer[total_generated++] = current_node;
     // get the neighbors of the current node
-    for (int i = 0; i < knn; i++) {
-      int neighbor = data[current_node * knn + i];
+    for (unsigned i = 0; i < knn; i++) {
+      auto neighbor = data[current_node][i];
       // if the neighbor is not visited, add it to the working queue
       if (!visited[neighbor]) {
         working_stack.push(neighbor);

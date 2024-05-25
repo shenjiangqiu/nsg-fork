@@ -47,6 +47,7 @@ void taskProducer(TaskQueue &taskQueue, int n, std::mutex &cvMtx,
   }
 }
 
+
 void taskConsumer(TaskQueue &taskQueue, std::mutex &cvMtx,
                   std::condition_variable &cv, bool &ready,
                   unsigned numConsumers, std::atomic_uint &tasksCompleted) {
@@ -75,5 +76,3 @@ void taskConsumer(TaskQueue &taskQueue, std::mutex &cvMtx,
     }
   }
 }
-
-

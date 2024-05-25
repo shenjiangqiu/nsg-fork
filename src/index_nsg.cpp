@@ -450,7 +450,6 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   unsigned step_size = nd_/percent;
   std::mutex progress_lock;
   */
-  unsigned range = parameters.Get<unsigned>("R");
   std::vector<std::mutex> locks(nd_);
 
 #pragma omp parallel
