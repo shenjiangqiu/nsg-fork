@@ -1,0 +1,2 @@
+./build_release/tests/sjq_test_nsg_index dataset/sift/sift_base.fvecs dataset/sift/sift_200nn.graph 50 40 500 out.nsg 40 100
+# ./build_release/tests/sjq_test_nsg_index dataset/sift/sift_base.fvecs dataset/sift/sift_200nn.graph 50 40 500 out.nsg 40 100

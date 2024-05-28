@@ -1,11 +1,13 @@
 #ifndef EFANNA2E_BFS_H
 #define EFANNA2E_BFS_H
 
+#include <iostream>
 #include <memory>
 #include <queue>
 #include <string.h>
 #include <string>
 #include <vector>
+
 struct bfs {
 
   unsigned current_nodes = 0;
@@ -15,7 +17,11 @@ struct bfs {
   std::queue<unsigned> working_queue;
 
   inline bfs(const unsigned total_nodes, const unsigned knn)
-      : total_nodes(total_nodes), knn(knn), visited(total_nodes, false) {}
+      : total_nodes(total_nodes), knn(knn), visited(total_nodes, false) {
+    std::cout << "bfs constructor" << std::endl;
+    std::cout << "total_nodes: " << total_nodes << std::endl;
+    std::cout << "knn: " << knn << std::endl;
+  }
   inline unsigned next(const unsigned size,
                        const std::vector<std::vector<unsigned>> &data,
                        unsigned *buffer);

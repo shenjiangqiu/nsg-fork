@@ -6,8 +6,6 @@
 #include <efanna2e/util.h>
 // #include "rust-lib.h"
 
-
-
 void load_data(char *filename, float *&data, unsigned &num,
                unsigned &dim) { // load data with sift10K pattern
   std::ifstream in(filename, std::ios::binary);
@@ -68,7 +66,7 @@ int main(int argc, char **argv) {
   index.Load_nn_graph(nn_graph_path.c_str());
   std::cout << "done, start runing" << "\n";
   // for (unsigned threads = 64; threads >= 4; threads -= 4) {
-  for (unsigned traversal_idx = 1; traversal_idx < 2; traversal_idx++) {
+  for (unsigned traversal_idx = 1; traversal_idx <= 3; traversal_idx++) {
     std::cout << "traversal_idx: " << traversal_idx << "\n";
     // const unsigned long *trace = traversal_sequence[0];
     auto s = std::chrono::high_resolution_clock::now();
@@ -83,7 +81,7 @@ int main(int argc, char **argv) {
   }
   // }
 
-  index.Save(argv[6]);
+  // index.Save(argv[6]);
 
   return 0;
 }

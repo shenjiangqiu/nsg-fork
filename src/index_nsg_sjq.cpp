@@ -74,17 +74,59 @@ void IndexNSG::Load(const char *filename) {
   cc /= nd_;
   // std::cout<<cc<<std::endl;
 }
+void load_nn_graph(const char *filename,
+                   std::vector<std::vector<unsigned>> &final_graph_,
+                   unsigned &dim, unsigned &num) {
+  std::cout << "loading graph file: " << filename << std::endl;
+  std::ifstream in(filename, std::ios::binary);
+  in.read((char *)&dim, sizeof(unsigned));
+  std::cout << "k: " << dim << std::endl;
+  in.seekg(0, std::ios::end);
+  std::ios::pos_type ss = in.tellg();
+  size_t fsize = (size_t)ss;
+  num = (unsigned)(fsize / (dim + 1) / 4);
+  if (num * (dim + 1) * 4 != fsize) {
+    std::cout << "file size error" << std::endl;
+    exit(-1);
+  }
+  std::cout << "num: " << num << std::endl;
+  in.seekg(0, std::ios::beg);
 
+  final_graph_.resize(num);
+  final_graph_.reserve(num);
+  unsigned kk = (dim + 3) / 4 * 4;
+  for (size_t i = 0; i < num; i++) {
+    in.seekg(4, std::ios::cur);
+    final_graph_[i].resize(dim);
+    final_graph_[i].reserve(kk);
+    in.read((char *)final_graph_[i].data(), dim * sizeof(unsigned));
+    if (i == 0) {
+      for (int j = 0; j < 10; j++) {
+        std::cout << "final_graph_[0]: " << final_graph_[0][j] << std::endl;
+      }
+    }
+  }
+  in.close();
+}
 void IndexNSG::Load_nn_graph(const char *filename) {
   std::cout << "loading graph file: " << filename << std::endl;
   std::ifstream in(filename, std::ios::binary);
   unsigned k;
   in.read((char *)&k, sizeof(unsigned));
+  this->knn = k;
   std::cout << "k: " << k << std::endl;
   in.seekg(0, std::ios::end);
   std::ios::pos_type ss = in.tellg();
   size_t fsize = (size_t)ss;
   size_t num = (unsigned)(fsize / (k + 1) / 4);
+  if (num != nd_) {
+    std::cout << "num: " << num << " nd_: " << nd_ << std::endl;
+    throw std::invalid_argument("Invalid graph file");
+  }
+  if (num * (k + 1) * 4 != fsize) {
+    std::cout << "file size error" << std::endl;
+    exit(-1);
+  }
   std::cout << "num: " << num << std::endl;
   in.seekg(0, std::ios::beg);
 
@@ -474,11 +516,11 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   case 1:
     // it's bfs
     producer = std::thread([&] {
-      bfs bfs(nd_, dimension_);
+      bfs bfs(nd_, this->knn);
       while (true) {
         auto buffer = new unsigned[batch_size * threads];
 
-        std::cout << "Producer is producing tasks" << std::endl;
+        // std::cout << "Producer is producing tasks" << std::endl;
         const auto count =
             bfs.next(batch_size * threads, this->final_graph_, buffer);
         // generating tasks
@@ -488,7 +530,7 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
         task_queue.push({buffer, count});
         cv.notify_all();
         if (count == 0) {
-          std::cout << "Producer has finished" << std::endl;
+          // std::cout << "Producer has finished" << std::endl;
           break;
         }
       }
@@ -497,11 +539,11 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   case 2:
     // it's dfs
     producer = std::thread([&] {
-      dfs dfs(nd_, dimension_);
+      dfs dfs(nd_, this->knn);
       while (true) {
         auto buffer = new unsigned[batch_size * threads];
 
-        std::cout << "Producer is producing tasks" << std::endl;
+        // std::cout << "Producer is producing tasks" << std::endl;
         const auto count =
             dfs.next(batch_size * threads, this->final_graph_, buffer);
         // generating tasks
@@ -512,7 +554,7 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
         cv.notify_all();
 
         if (count == 0) {
-          std::cout << "Producer has finished" << std::endl;
+          // std::cout << "Producer has finished" << std::endl;
           break;
         }
       }
@@ -521,11 +563,11 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   case 3:
     // it's bdfs
     producer = std::thread([&] {
-      bdfs bdfs(nd_, dimension_, 10, 50);
+      bdfs bdfs(nd_, this->knn, 10, 50);
       while (true) {
         auto buffer = new unsigned[batch_size * threads];
 
-        std::cout << "Producer is producing tasks" << std::endl;
+        // std::cout << "Producer is producing tasks" << std::endl;
         const auto count =
             bdfs.next(batch_size * threads, this->final_graph_, buffer);
         // generating tasks
@@ -536,7 +578,7 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
         cv.notify_all();
 
         if (count == 0) {
-          std::cout << "Producer has finished" << std::endl;
+          // std::cout << "Producer has finished" << std::endl;
           break;
         }
       }
@@ -554,31 +596,31 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   for (unsigned tid = 0; tid < threads; tid++) {
     working_threads.push_back(std::thread([&, tid] {
       unsigned thread_id = tid;
-      std::cout << "working thread tid: " << thread_id << std::endl;
+      // std::cout << "working thread tid: " << thread_id << std::endl;
       std::vector<Neighbor> pool, tmp;
       boost::dynamic_bitset<> flags{nd_, 0};
       while (true) {
         std::unique_lock<std::mutex> lock(task_queue_mutex);
-        std::cout << "TID: " << thread_id << " is waiting for tasks"
-                  << std::endl;
+        // std::cout << "TID: " << thread_id << " is waiting for tasks"
+        // << std::endl;
         cv.wait(lock, [&] { return !task_queue.empty(); });
         auto [task, count] = task_queue.front();
         if (count == 0) {
-          std::cout << "count is 0, exiting !!!!!!!!!!!!!!" << std::endl;
+          // std::cout << "count is 0, exiting !!!!!!!!!!!!!!" << std::endl;
           lock.unlock();
           break;
         }
         count_working++;
         unsigned real_batch_size = (count + threads - 1) / threads;
         if (count_working == threads) {
-          std::cout << "All threads are working" << std::endl;
+          // std::cout << "All threads are working" << std::endl;
           task_queue.pop();
           cv.notify_all();
           count_working = 0;
         }
         lock.unlock();
-        std::cout << "TID: " << thread_id << " is processing a task"
-                  << std::endl;
+        // std::cout << "TID: " << thread_id << " is processing a task"
+        // << std::endl;
         // start processing the tasks
         auto end_task = task + count;
         auto my_task = task + thread_id * real_batch_size;
@@ -597,7 +639,7 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
         barrier.arrive_and_wait();
         // now all task finished, free the memory
         if (thread_id == 0) {
-          std::cout << "All threads finished" << std::endl;
+          // std::cout << "All threads finished" << std::endl;
           delete[] task;
         }
       }
@@ -606,12 +648,12 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
 
   // join the producer thread
   producer.join();
-  std::cout << "Producer thread finished" << std::endl;
+  // std::cout << "Producer thread finished" << std::endl;
   // join the working threads
   unsigned id = 0;
   for (auto &thread : working_threads) {
     thread.join();
-    std::cout << "Working thread " << id << " finished" << std::endl;
+    // std::cout << "Working thread " << id << " finished" << std::endl;
     id++;
   }
   working_threads.clear();
@@ -631,10 +673,10 @@ void IndexNSG::Build(size_t n, const float *data, const Parameters &parameters,
   init_graph(parameters);
   SimpleNeighbor *cut_graph_ = new SimpleNeighbor[nd_ * (size_t)range];
   Link(parameters, cut_graph_, seq_id);
-  std::cout << cut_graph_[100].id;
-  std::cout << cut_graph_[200].id;
-  std::cout << cut_graph_[300].distance;
-  std::cout << cut_graph_[nd_ * (size_t)range - 1].distance;
+  // std::cout << cut_graph_[100].id;
+  // std::cout << cut_graph_[200].id;
+  // std::cout << cut_graph_[300].distance;
+  // std::cout << cut_graph_[nd_ * (size_t)range - 1].distance;
 
   //        final_graph_.resize(nd_);
   //

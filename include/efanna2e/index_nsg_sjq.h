@@ -1,5 +1,10 @@
 #ifndef INDEX_SJQ_H
 #define INDEX_SJQ_H
+#include "distance.h"
+#include "index.h"
+#include "neighbor.h"
+#include "parameters.h"
+#include "util.h"
 #include <boost/dynamic_bitset.hpp>
 #include <cassert>
 #include <memory>
@@ -7,12 +12,6 @@
 #include <stack>
 #include <string>
 #include <unordered_map>
-#include "distance.h"
-#include "index.h"
-#include "neighbor.h"
-#include "parameters.h"
-#include "util.h"
-
 
 namespace sjq {
 using namespace efanna2e;
@@ -88,13 +87,21 @@ private:
 
   // from index.h
   const size_t dimension_;
-  // the raw fvec data
+
+    // the raw fvec data
   const float *data_ = nullptr;
   // the number of nodes
   size_t nd_;
   std::unique_ptr<efanna2e::Distance> distance_;
   bool has_built;
+
+  // the number of neighbors
+  unsigned knn;
 };
+
+void load_nn_graph(const char *filename,
+                   std::vector<std::vector<unsigned>> &final_graph_,
+                   unsigned &dim, unsigned &num);
 } // namespace sjq
 
 #endif // EFANNA2E_INDEX_NSG_H
