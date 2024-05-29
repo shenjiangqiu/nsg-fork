@@ -14,3 +14,6 @@ run_release fdata knndata k c l out:build_release
 
 test_release name="":build_release
     ./build_release/unit_tests/tests "{{name}}"
+
+test_nn name="":build_release
+    ./build_release/tests/test_nn "{{name}}"
