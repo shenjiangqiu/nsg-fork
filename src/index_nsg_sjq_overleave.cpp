@@ -16,12 +16,12 @@
 #include <efanna2e/bdfs.h>
 #include <efanna2e/bfs.h>
 #include <efanna2e/dfs.h>
-#include <efanna2e/index_nsg_sjq.h>
+#include <efanna2e/index_nsg_sjq_overleave.h>
 #include <functional>
 #include <mutex>
 #include <queue>
 #include <thread>
-namespace sjq {
+namespace sjq_overleave {
 #define _CONTROL_NUM 100
 
 IndexNSG::IndexNSG(const size_t dimension, const size_t n, Metric m,
@@ -517,7 +517,6 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
     // it's bfs
     producer = std::thread([&] {
       bfs bfs(nd_, this->knn);
-      unsigned total_count = 0;
       while (true) {
         auto buffer = new unsigned[batch_size * threads];
 
@@ -525,14 +524,13 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
         const auto count =
             bfs.next(batch_size * threads, this->final_graph_, buffer);
         // generating tasks
-        total_count += count;
+
         std::unique_lock<std::mutex> lock(task_queue_mutex);
         cv.wait(lock, [&] { return task_queue.size() < max_queue_size; });
         task_queue.push({buffer, count});
         cv.notify_all();
         if (count == 0) {
           // std::cout << "Producer has finished" << std::endl;
-          std::cout << "total_count: " << total_count << std::endl;
           break;
         }
       }
@@ -542,21 +540,20 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
     // it's dfs
     producer = std::thread([&] {
       dfs dfs(nd_, this->knn);
-      unsigned total_count = 0;
       while (true) {
         auto buffer = new unsigned[batch_size * threads];
+
         // std::cout << "Producer is producing tasks" << std::endl;
         const auto count =
             dfs.next(batch_size * threads, this->final_graph_, buffer);
         // generating tasks
-        total_count += count;
+
         std::unique_lock<std::mutex> lock(task_queue_mutex);
         cv.wait(lock, [&] { return task_queue.size() < max_queue_size; });
         task_queue.push({buffer, count});
         cv.notify_all();
 
         if (count == 0) {
-          std::cout << "total_count: " << total_count << std::endl;
           // std::cout << "Producer has finished" << std::endl;
           break;
         }
@@ -567,7 +564,6 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
     // it's bdfs
     producer = std::thread([&] {
       bdfs bdfs(nd_, this->knn, 10, 50);
-      unsigned total_count = 0;
       while (true) {
         auto buffer = new unsigned[batch_size * threads];
 
@@ -579,12 +575,10 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
         std::unique_lock<std::mutex> lock(task_queue_mutex);
         cv.wait(lock, [&] { return task_queue.size() < max_queue_size; });
         task_queue.push({buffer, count});
-        total_count += count;
         cv.notify_all();
 
         if (count == 0) {
           // std::cout << "Producer has finished" << std::endl;
-          std::cout << "total_count: " << total_count << std::endl;
           break;
         }
       }
@@ -996,4 +990,4 @@ void IndexNSG::tree_grow(const Parameters &parameter) {
     }
   }
 }
-} // namespace sjq
+} // namespace sjq_overleave

@@ -100,3 +100,35 @@ TEST_CASE("bfs_correct_deep") {
     }
   }
 }
+
+TEST_CASE("bfs_correct_deep100m") {
+  std::vector<std::vector<unsigned>> data;
+  unsigned dim, num;
+  sjq::load_nn_graph(
+      "/mnt/raiddisk/sjq/generate_faiss_knn/dataset/deep/out_100M.ivecs",
+      data, dim, num);
+  bfs bfs(num, dim);
+  std::vector<bool> visited(num, false);
+  unsigned buffer[50 * 100];
+  unsigned count = bfs.next(50 * 100, data, buffer);
+  while (count != 0) {
+    REQUIRE(count <= 50 * 100);
+    for (unsigned i = 0; i < count; i++) {
+      REQUIRE(buffer[i] < num);
+      if (visited[buffer[i]]) {
+        std::cout << "error" << std::endl;
+        std::cout << "buffer[i]:" << buffer[i] << " is already visited"
+                  << std::endl;
+      }
+      visited[buffer[i]] = true;
+    }
+
+    count = bfs.next(50 * 100, data, buffer);
+  }
+  for (unsigned i = 0; i < num; i++) {
+    if (!visited[i]) {
+      std::cout << "error" << std::endl;
+      std::cout << "i:" << i << " is not visited" << std::endl;
+    }
+  }
+}

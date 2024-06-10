@@ -78,7 +78,10 @@
         "stack": "cpp",
         "unordered_set": "cpp",
         "filesystem": "cpp",
-        "barrier": "cpp"
+        "barrier": "cpp",
+        "locale": "cpp",
+        "future": "cpp",
+        "ios": "cpp"
     },
     "git.ignoreLimitWarning": true,
     "C_Cpp.default.compilerPath": "/usr/bin/g++",

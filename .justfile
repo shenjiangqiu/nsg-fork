@@ -8,6 +8,12 @@ build_debug_cmake:
 build_debug:build_debug_cmake
     cmake --build build_debug -- -j
 
+build_cmake:
+    cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=On
+build:build_cmake
+    cmake --build build -- -j
+
+
 run_release fdata knndata k c l out:build_release
     ./build_release/tests/test_nsg_index {{fdata}} {{knndata}} {{k}} {{c}} {{l}} {{out}}
 

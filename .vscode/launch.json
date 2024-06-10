@@ -4,13 +4,14 @@
     // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "(gdb) unit test bfs",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build_debug/unit_tests/tests",
+            "program": "${workspaceFolder}/build/unit_tests/tests",
             "args": [
-                "bfs_correct"
+                "test_task"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

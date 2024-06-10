@@ -2,7 +2,8 @@
 // Created by 付聪 on 2017/6/21.
 //
 
-#include <efanna2e/index_nsg_sjq.h>
+// #include <efanna2e/index_nsg_sjq.h>
+#include <efanna2e/index_nsg_sjq_async.h>
 #include <efanna2e/util.h>
 // #include "rust-lib.h"
 
@@ -54,7 +55,7 @@ int main(int argc, char **argv) {
   paras.Set<std::string>("nn_graph_path", nn_graph_path);
   // data_load = efanna2e::data_align(data_load, points_num, dim);//one must
   // align the data before build
-  sjq::IndexNSG index(dim, points_num, efanna2e::L2, nullptr);
+  sjq_async::IndexNSG index(dim, points_num, efanna2e::L2, nullptr);
 
   auto dm = index.GetDimension();
   auto sz = index.GetSizeOfDataset();
@@ -66,7 +67,7 @@ int main(int argc, char **argv) {
   index.Load_nn_graph(nn_graph_path.c_str());
   std::cout << "done, start runing" << "\n";
   // for (unsigned threads = 64; threads >= 4; threads -= 4) {
-  for (unsigned traversal_idx = 1; traversal_idx <= 3; traversal_idx++) {
+  for (unsigned traversal_idx = 3; traversal_idx <= 3; traversal_idx++) {
     std::cout << "traversal_idx: " << traversal_idx << "\n";
     // const unsigned long *trace = traversal_sequence[0];
     auto s = std::chrono::high_resolution_clock::now();

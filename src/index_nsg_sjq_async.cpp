@@ -12,16 +12,18 @@
 #include <atomic>
 #include <barrier>
 #include <condition_variable>
+#include <efanna2e/async_task_pool.h>
 #include <efanna2e/avx256.h>
 #include <efanna2e/bdfs.h>
 #include <efanna2e/bfs.h>
 #include <efanna2e/dfs.h>
-#include <efanna2e/index_nsg_sjq.h>
+#include <efanna2e/index_nsg_sjq_async.h>
 #include <functional>
 #include <mutex>
 #include <queue>
 #include <thread>
-namespace sjq {
+
+namespace sjq_async {
 #define _CONTROL_NUM 100
 
 IndexNSG::IndexNSG(const size_t dimension, const size_t n, Metric m,
@@ -506,88 +508,119 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   unsigned threads = parameters.Get<unsigned>("T");
   unsigned batch_size = parameters.Get<unsigned>("batchSize");
   // set up a task queue
-  std::queue<std::pair<unsigned *, unsigned>> task_queue;
-  std::mutex task_queue_mutex;
-  std::condition_variable cv;
-  unsigned max_queue_size = 10;
+  AsyncTaskPool task_pool(threads, batch_size);
   std::thread producer;
 
   switch (traversal_sequence) {
   case 1:
     // it's bfs
     producer = std::thread([&] {
-      bfs bfs(nd_, this->knn);
-      unsigned total_count = 0;
-      while (true) {
-        auto buffer = new unsigned[batch_size * threads];
+      bfs bfs(this->nd_, this->knn);
 
-        // std::cout << "Producer is producing tasks" << std::endl;
-        const auto count =
-            bfs.next(batch_size * threads, this->final_graph_, buffer);
-        // generating tasks
-        total_count += count;
-        std::unique_lock<std::mutex> lock(task_queue_mutex);
-        cv.wait(lock, [&] { return task_queue.size() < max_queue_size; });
-        task_queue.push({buffer, count});
-        cv.notify_all();
-        if (count == 0) {
-          // std::cout << "Producer has finished" << std::endl;
-          std::cout << "total_count: " << total_count << std::endl;
+      std::cout << "producer" << std::endl;
+      unsigned *temp_buffer = new unsigned[threads * batch_size];
+      while (true) {
+        bool good = task_pool.set_next_task([&](unsigned *buffer) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          unsigned size = (threads * batch_size);
+          auto total_tasks = bfs.next(size, this->final_graph_, temp_buffer);
+
+          for (unsigned i = 0; i < threads; i++) {
+            buffer[i * (batch_size + 1)] = 0;
+          }
+          // put temp_buffer to buffer
+          for (unsigned i = 0; i < total_tasks; i++) {
+            unsigned index = i % threads;
+            unsigned current_task_index = buffer[index * (batch_size + 1)];
+            buffer[index * (batch_size + 1) + 1 + current_task_index] =
+                temp_buffer[i];
+            buffer[index * (batch_size + 1)]++;
+          }
+          if (total_tasks == 0) {
+            return false;
+          } else {
+            return true;
+          }
+        });
+        if (!good) {
           break;
         }
       }
+      delete[] temp_buffer;
     });
     break;
   case 2:
     // it's dfs
     producer = std::thread([&] {
       dfs dfs(nd_, this->knn);
-      unsigned total_count = 0;
-      while (true) {
-        auto buffer = new unsigned[batch_size * threads];
-        // std::cout << "Producer is producing tasks" << std::endl;
-        const auto count =
-            dfs.next(batch_size * threads, this->final_graph_, buffer);
-        // generating tasks
-        total_count += count;
-        std::unique_lock<std::mutex> lock(task_queue_mutex);
-        cv.wait(lock, [&] { return task_queue.size() < max_queue_size; });
-        task_queue.push({buffer, count});
-        cv.notify_all();
 
-        if (count == 0) {
-          std::cout << "total_count: " << total_count << std::endl;
-          // std::cout << "Producer has finished" << std::endl;
+      std::cout << "producer" << std::endl;
+      unsigned *temp_buffer = new unsigned[threads * batch_size];
+      while (true) {
+        bool good = task_pool.set_next_task([&](unsigned *buffer) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          unsigned size = (threads * batch_size);
+          auto total_tasks = dfs.next(size, this->final_graph_, temp_buffer);
+
+          for (unsigned i = 0; i < threads; i++) {
+            buffer[i * (batch_size + 1)] = 0;
+          }
+          // put temp_buffer to buffer
+          for (unsigned i = 0; i < total_tasks; i++) {
+            unsigned index = i % threads;
+            unsigned current_task_index = buffer[index * (batch_size + 1)];
+            buffer[index * (batch_size + 1) + 1 + current_task_index] =
+                temp_buffer[i];
+            buffer[index * (batch_size + 1)]++;
+          }
+          if (total_tasks == 0) {
+            return false;
+          } else {
+            return true;
+          }
+        });
+        if (!good) {
           break;
         }
       }
+      delete[] temp_buffer;
     });
     break;
   case 3:
     // it's bdfs
     producer = std::thread([&] {
       bdfs bdfs(nd_, this->knn, 10, 50);
-      unsigned total_count = 0;
+
+      std::cout << "producer" << std::endl;
+      unsigned *temp_buffer = new unsigned[threads * batch_size];
       while (true) {
-        auto buffer = new unsigned[batch_size * threads];
+        bool good = task_pool.set_next_task([&](unsigned *buffer) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          unsigned size = (threads * batch_size);
+          auto total_tasks = bdfs.next(size, this->final_graph_, temp_buffer);
 
-        // std::cout << "Producer is producing tasks" << std::endl;
-        const auto count =
-            bdfs.next(batch_size * threads, this->final_graph_, buffer);
-        // generating tasks
-
-        std::unique_lock<std::mutex> lock(task_queue_mutex);
-        cv.wait(lock, [&] { return task_queue.size() < max_queue_size; });
-        task_queue.push({buffer, count});
-        total_count += count;
-        cv.notify_all();
-
-        if (count == 0) {
-          // std::cout << "Producer has finished" << std::endl;
-          std::cout << "total_count: " << total_count << std::endl;
+          for (unsigned i = 0; i < threads; i++) {
+            buffer[i * (batch_size + 1)] = 0;
+          }
+          // put temp_buffer to buffer
+          for (unsigned i = 0; i < total_tasks; i++) {
+            unsigned index = i % threads;
+            unsigned current_task_index = buffer[index * (batch_size + 1)];
+            buffer[index * (batch_size + 1) + 1 + current_task_index] =
+                temp_buffer[i];
+            buffer[index * (batch_size + 1)]++;
+          }
+          if (total_tasks == 0) {
+            return false;
+          } else {
+            return true;
+          }
+        });
+        if (!good) {
           break;
         }
       }
+      delete[] temp_buffer;
     });
     break;
   default:
@@ -601,52 +634,30 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   std::barrier barrier(threads);
   for (unsigned tid = 0; tid < threads; tid++) {
     working_threads.push_back(std::thread([&, tid] {
-      unsigned thread_id = tid;
-      // std::cout << "working thread tid: " << thread_id << std::endl;
       std::vector<Neighbor> pool, tmp;
       boost::dynamic_bitset<> flags{nd_, 0};
-      while (true) {
-        std::unique_lock<std::mutex> lock(task_queue_mutex);
-        // std::cout << "TID: " << thread_id << " is waiting for tasks"
-        // << std::endl;
-        cv.wait(lock, [&] { return !task_queue.empty(); });
-        auto [task, count] = task_queue.front();
-        if (count == 0) {
-          // std::cout << "count is 0, exiting !!!!!!!!!!!!!!" << std::endl;
-          lock.unlock();
-          break;
-        }
-        count_working++;
-        unsigned real_batch_size = (count + threads - 1) / threads;
-        if (count_working == threads) {
-          // std::cout << "All threads are working" << std::endl;
-          task_queue.pop();
-          cv.notify_all();
-          count_working = 0;
-        }
-        lock.unlock();
-        // std::cout << "TID: " << thread_id << " is processing a task"
-        // << std::endl;
-        // start processing the tasks
-        auto end_task = task + count;
-        auto my_task = task + thread_id * real_batch_size;
-        auto alter_size = end_task - my_task;
-        real_batch_size =
-            alter_size < real_batch_size ? alter_size : real_batch_size;
-        for (unsigned i = 0; i < real_batch_size; i++) {
-          unsigned n = my_task[i];
-          pool.clear();
-          tmp.clear();
-          flags.reset();
-          get_neighbors(data_ + dimension_ * n, parameters, flags, tmp, pool);
-          sync_prune(n, pool, parameters, flags, cut_graph_);
-        }
 
-        barrier.arrive_and_wait();
-        // now all task finished, free the memory
-        if (thread_id == 0) {
-          // std::cout << "All threads finished" << std::endl;
-          delete[] task;
+      while (true) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        auto good = task_pool.get_next_task([&](unsigned *task) {
+          unsigned tasks = task[0];
+          if (tasks == 0) {
+            return false;
+          }
+          for (unsigned i = 0; i < tasks; i++) {
+            auto n = task[i + 1];
+            pool.clear();
+            tmp.clear();
+            flags.reset();
+            get_neighbors(data_ + dimension_ * n, parameters, flags, tmp, pool);
+            sync_prune(n, pool, parameters, flags, cut_graph_);
+          }
+          // std::cout << std::endl;
+          return true;
+        });
+        if (!good) {
+          break;
         }
       }
     }));
@@ -663,11 +674,6 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
     id++;
   }
   working_threads.clear();
-  while (!task_queue.empty()) {
-    auto [task, count] = task_queue.front();
-    task_queue.pop();
-    delete[] task;
-  }
 }
 
 void IndexNSG::Build(size_t n, const float *data, const Parameters &parameters,
@@ -996,4 +1002,4 @@ void IndexNSG::tree_grow(const Parameters &parameter) {
     }
   }
 }
-} // namespace sjq
+} // namespace sjq_async
