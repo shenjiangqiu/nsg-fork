@@ -81,12 +81,14 @@
         "barrier": "cpp",
         "locale": "cpp",
         "future": "cpp",
-        "ios": "cpp"
+        "ios": "cpp",
+        "__bit_reference": "cpp"
     },
     "git.ignoreLimitWarning": true,
     "C_Cpp.default.compilerPath": "/usr/bin/g++",
     "rust-analyzer.cargo.features": [
         "avx512"
     ],
-    "editor.tabSize": 2
+    "editor.tabSize": 2,
+    "python.analysis.typeCheckingMode": "basic"
 }

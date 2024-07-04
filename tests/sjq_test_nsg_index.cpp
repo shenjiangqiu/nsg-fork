@@ -67,18 +67,21 @@ int main(int argc, char **argv) {
   index.Load_nn_graph(nn_graph_path.c_str());
   std::cout << "done, start runing" << "\n";
   // for (unsigned threads = 64; threads >= 4; threads -= 4) {
-  for (unsigned traversal_idx = 3; traversal_idx <= 3; traversal_idx++) {
-    std::cout << "traversal_idx: " << traversal_idx << "\n";
-    // const unsigned long *trace = traversal_sequence[0];
-    auto s = std::chrono::high_resolution_clock::now();
+  for (unsigned traversal_idx = 1; traversal_idx <= 3; traversal_idx++) {
+    for (unsigned round = 0; round < 3; round++) {
+      std::cout << "traversal_idx: " << traversal_idx << "\n";
+      std::cout << "round: " << round << "\n";
+      // const unsigned long *trace = traversal_sequence[0];
+      auto s = std::chrono::high_resolution_clock::now();
 
-    // paras.Set<unsigned>("Threads", threads);
+      // paras.Set<unsigned>("Threads", threads);
 
-    index.Build(points_num, data_load, paras, traversal_idx);
-    auto e = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> diff = e - s;
+      index.Build(points_num, data_load, paras, traversal_idx);
+      auto e = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double> diff = e - s;
 
-    std::cout << "indexing time: " << diff.count() << "\n";
+      std::cout << "indexing time: " << diff.count() << "\n";
+    }
   }
   // }
 

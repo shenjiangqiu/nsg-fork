@@ -30,12 +30,13 @@ void load_data(char *filename, float *&data, unsigned &num,
 }
 
 int main(int argc, char **argv) {
-  if (argc != 8) {
+  if (argc != 9) {
     std::cout << argv[0]
-              << " data_file nn_graph_path L R C save_graph_file Threads"
+              << " data_file nn_graph_path L R C save_graph_file Threads Batch"
               << std::endl;
     exit(-1);
   }
+  std::cout <<"start"<<std::endl;
   float *data_load = NULL;
   unsigned points_num, dim;
   load_data(argv[1], data_load, points_num, dim);
@@ -43,12 +44,14 @@ int main(int argc, char **argv) {
   std::string nn_graph_path(argv[2]);
   unsigned L = (unsigned)atoi(argv[3]);
   unsigned R = (unsigned)atoi(argv[4]);
+  unsigned B = (unsigned)atoi(argv[8]);
   unsigned C = (unsigned)atoi(argv[5]);
   efanna2e::Parameters paras;
   unsigned Threads = (unsigned)atoi(argv[7]);
   paras.Set<unsigned>("L", L);
   paras.Set<unsigned>("R", R);
   paras.Set<unsigned>("C", C);
+  paras.Set<unsigned>("B", B);
   paras.Set<unsigned>("T", Threads);
   paras.Set<std::string>("nn_graph_path", nn_graph_path);
   omp_set_num_threads(Threads);
@@ -67,17 +70,22 @@ int main(int argc, char **argv) {
   std::cout << "done, start runing" << "\n";
   // for (unsigned threads = 64; threads >= 4; threads -= 4) {
   for (unsigned traversal_idx = 0; traversal_idx < 1; traversal_idx++) {
-    std::cout << "traversal_idx: " << traversal_idx << "\n";
-    // const unsigned long *trace = traversal_sequence[0];
-    auto s = std::chrono::high_resolution_clock::now();
+    for (unsigned round = 0; round < 5; round++) {
+      srand(22233);
+      std::cout << "traversal_idx: " << traversal_idx << "\n";
+      std::cout << "round: " << round << "\n";
+      std::cout.flush();
+      // const unsigned long *trace = traversal_sequence[0];
+      auto s = std::chrono::high_resolution_clock::now();
 
-    // paras.Set<unsigned>("Threads", threads);
+      // paras.Set<unsigned>("Threads", threads);
 
-    index.Build(points_num, data_load, paras, traversal_idx);
-    auto e = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> diff = e - s;
+      index.Build(points_num, data_load, paras, traversal_idx);
+      auto e = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double> diff = e - s;
 
-    std::cout << "indexing time: " << diff.count() << "\n";
+      std::cout << "indexing time: " << diff.count() << "\n";
+    }
   }
   // }
 

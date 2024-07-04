@@ -43,7 +43,7 @@ class Index {
   inline size_t GetSizeOfDataset() const { return nd_; }
 
   inline const float *GetDataset() const { return data_; }
- protected:
+ public:
   const size_t dimension_;
   // the raw fvec data
   const float *data_ = nullptr;

@@ -20,3 +20,4 @@ raidsjq
 *.data
 *.old
 *.ivecs
+/logs

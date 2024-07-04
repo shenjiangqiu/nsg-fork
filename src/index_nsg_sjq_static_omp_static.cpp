@@ -1,4 +1,4 @@
-#include "efanna2e/index_nsg.h"
+#include "efanna2e/index_nsg_sjq_static_omp_static.h"
 
 #include <bitset>
 #include <boost/dynamic_bitset.hpp>
@@ -10,11 +10,44 @@
 #include "efanna2e/parameters.h"
 // #include <efanna2e/avx512.h>
 #include <efanna2e/avx256.h>
-namespace efanna2e {
-#define _CONTROL_NUM 100
+namespace sjq_static_omp_static {
+
 #ifndef THREAD_BATCH
 #define THREAD_BATCH 100
 #endif
+
+void distribute_traversal_sequence(unsigned *traversal_sequence,
+                                   unsigned *traversal_sequence_reordered,
+                                   unsigned threads, unsigned nd,
+                                   int nd_rounded) {
+
+  unsigned tasks_per_thread = nd_rounded / threads;
+  unsigned round = 0;
+  unsigned c_t = 0;
+  unsigned c_nd = 0;
+  while (c_nd < nd) {
+    auto next = traversal_sequence[c_nd];
+    auto next_reorderd = c_t * tasks_per_thread + round;
+    traversal_sequence_reordered[next_reorderd] = next;
+    c_nd++;
+    c_t++;
+    if (c_t == threads) {
+      c_t = 0;
+      round++;
+    }
+  }
+  // fill all others to -1
+  while (round < tasks_per_thread && c_t < threads) {
+    auto next_reorderd = c_t * tasks_per_thread + round;
+    traversal_sequence_reordered[next_reorderd] = -1;
+    c_t++;
+    if (c_t == threads) {
+      c_t = 0;
+      round++;
+    }
+  }
+}
+
 IndexNSG::IndexNSG(const size_t dimension, const size_t n, Metric m,
                    Index *initializer)
     : Index(dimension, n, m), initializer_{initializer} {}
@@ -80,7 +113,7 @@ void IndexNSG::Load_nn_graph(const char *filename) {
   size_t num = (unsigned)(fsize / (k + 1) / 4);
   std::cout << "num: " << num << std::endl;
   in.seekg(0, std::ios::beg);
-
+  this->knn = k;
   final_graph_.resize(num);
   final_graph_.reserve(num);
   unsigned kk = (k + 3) / 4 * 4;
@@ -291,7 +324,7 @@ void IndexNSG::init_graph(const Parameters &parameters) {
   ep_ = 100; // random initialize navigating point
   get_neighbors(center, parameters, tmp, pool);
   ep_ = tmp[0].id;
-  std::cout << "ep is " << ep_ << std::endl;
+  std::cout << "navigating point: " << ep_ << std::endl;
   delete[] center;
 }
 
@@ -455,7 +488,6 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   */
   std::vector<std::mutex> locks(nd_);
   unsigned batch_size = parameters.Get<unsigned>("B");
-
 #pragma omp parallel
   {
     // unsigned cnt = 0;
@@ -463,23 +495,13 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
     boost::dynamic_bitset<> flags{nd_, 0};
 #pragma omp for schedule(dynamic, batch_size)
     for (unsigned n = 0; n < nd_; ++n) {
-      // unsigned n_index = traversal_sequence[n];
       pool.clear();
       tmp.clear();
       flags.reset();
-      // from eq to query
       get_neighbors(data_ + dimension_ * n, parameters, flags, tmp, pool);
-      // save the pool
 
-      //      save_pool(n,pool);
       sync_prune(n, pool, parameters, flags, cut_graph_);
-      /*
-    cnt++;
-    if(cnt % step_size == 0){
-      LockGuard g(progress_lock);
-      std::cout<<progress++ <<"/"<< percent << " completed" << std::endl;
-      }
-      */
+      // save the cut_graph
     }
   }
 
@@ -497,6 +519,51 @@ void IndexNSG::Link(const Parameters &parameters, SimpleNeighbor *cut_graph_,
   //         }
 }
 
+void IndexNSG::Link_static(const Parameters &parameters,
+                           SimpleNeighbor *cut_graph_,
+                           const unsigned *traversal_sequence) {
+  /*
+  std::cout << " graph link" << std::endl;
+  unsigned progress=0;
+  unsigned percent = 100;
+  unsigned step_size = nd_/percent;
+  std::mutex progress_lock;
+  */
+  std::vector<std::mutex> locks(nd_);
+
+#pragma omp parallel
+  {
+    // unsigned cnt = 0;
+    std::vector<Neighbor> pool, tmp;
+    boost::dynamic_bitset<> flags{nd_, 0};
+#pragma omp for schedule(static)
+    for (unsigned n = 0; n < nd_rounded; ++n) {
+      unsigned n_index = traversal_sequence[n];
+      if (n_index == (unsigned)-1) {
+        continue;
+      }
+      pool.clear();
+      tmp.clear();
+      flags.reset();
+      get_neighbors(data_ + dimension_ * n_index, parameters, flags, tmp, pool);
+      sync_prune(n_index, pool, parameters, flags, cut_graph_);
+    }
+  }
+  //
+  //         for (unsigned batch_id = 0; batch_id < total_batch; batch_id++) {
+  //             const unsigned start = batch_id * num_threads;
+  //             unsigned end = (batch_id + 1) * num_threads;
+  //             if (end > nd_) {
+  //                 end = nd_;
+  //             }
+  // #pragma omp for schedule(static)
+  //             for (unsigned n = start; n < end; ++n) {
+  //                 unsigned n_index = traversal_sequence[n];
+  //                 InterInsert(n_index, range, locks, cut_graph_);
+  //             }
+  //         }
+  // vtune
+}
 void IndexNSG::Build(size_t n, const float *data, const Parameters &parameters,
                      const unsigned seq_id) {
   // info("Building the index");
@@ -506,6 +573,54 @@ void IndexNSG::Build(size_t n, const float *data, const Parameters &parameters,
   init_graph(parameters);
   SimpleNeighbor *cut_graph_ = new SimpleNeighbor[nd_ * (size_t)range];
   Link(parameters, cut_graph_, seq_id);
+  std::cout << cut_graph_[100].id;
+  std::cout << cut_graph_[200].id;
+  std::cout << cut_graph_[300].distance;
+  std::cout << cut_graph_[nd_ * (size_t)range - 1].distance;
+
+  //        final_graph_.resize(nd_);
+  //
+  //        for (size_t i = 0; i < nd_; i++) {
+  //            SimpleNeighbor *pool = cut_graph_ + i * (size_t) range;
+  //            unsigned pool_size = 0;
+  //            for (unsigned j = 0; j < range; j++) {
+  //                if (pool[j].distance == -1) break;
+  //                pool_size = j;
+  //            }
+  //            pool_size++;
+  //            final_graph_[i].resize(pool_size);
+  //            for (unsigned j = 0; j < pool_size; j++) {
+  //                final_graph_[i][j] = pool[j].id;
+  //            }
+  //        }
+
+  //        tree_grow(parameters);
+
+  //        unsigned max = 0, min = 1e6, avg = 0;
+  //        for (size_t i = 0; i < nd_; i++) {
+  //            auto size = final_graph_[i].size();
+  //            max = max < size ? size : max;
+  //            min = min > size ? size : min;
+  //            avg += size;
+  //        }
+  //        avg /= 1.0 * nd_;
+  //        printf("Degree Statistics: Max = %d, Min = %d, Avg = %d\n", max,
+  //        min, avg);
+  //
+  //        has_built = true;
+  delete[] cut_graph_;
+}
+
+void IndexNSG::Build_static(size_t n, const float *data,
+                            const Parameters &parameters,
+                            const unsigned *seq_id) {
+  // info("Building the index");
+  unsigned range = parameters.Get<unsigned>("R");
+
+  data_ = data;
+  init_graph(parameters);
+  SimpleNeighbor *cut_graph_ = new SimpleNeighbor[nd_ * (size_t)range];
+  Link_static(parameters, cut_graph_, seq_id);
   std::cout << cut_graph_[100].id;
   std::cout << cut_graph_[200].id;
   std::cout << cut_graph_[300].distance;
@@ -821,4 +936,4 @@ void IndexNSG::tree_grow(const Parameters &parameter) {
     }
   }
 }
-} // namespace efanna2e
+} // namespace sjq_static_omp_static

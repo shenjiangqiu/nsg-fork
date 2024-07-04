@@ -8,5 +8,5 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(Catch2)
 
-add_executable(tests test.cpp test_bfs.cpp test_task.cpp)
+add_executable(tests test.cpp test_bfs.cpp test_task.cpp test_omp.cpp)
 target_link_libraries(tests PRIVATE Catch2::Catch2WithMain ${PROJECT_NAME})

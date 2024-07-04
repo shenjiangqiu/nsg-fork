@@ -21,7 +21,7 @@ for config in [ [$base_10M,$out_10M]] {
     let ivecs_file = ($dataset_base_dir|path join $data|path join $out_file )
     info $ivecs_file
     just build_release
-    # ./build_release/tests/test_nsg_index $fvecs_file $ivecs_file 50 40 500 out.nsg 80 |save -f $"out_nsg_old_($data)_($base_file).log" 
+    ./build_release/tests/test_nsg_index $fvecs_file $ivecs_file 50 40 500 out.nsg 80 |save -f $"out_nsg_old_($data)_($base_file).log" 
     # ./build_release/tests/test_nsg_index $fvecs_file $ivecs_file 50 40 500 out.nsg 41  
 
     ./build_release/tests/sjq_test_nsg_index $fvecs_file $ivecs_file 50 40 500 out.nsg 79 100 |save -f $"out_nsg_new_($data)_($base_file).log"

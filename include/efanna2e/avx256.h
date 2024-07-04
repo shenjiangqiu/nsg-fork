@@ -5,7 +5,7 @@
 #include <cmath>
 #include <immintrin.h>
 
-float avx256l2translated(
+inline float avx256l2translated(
     const float *vec1, const float *vec2, int size)
 {
 #define AVX_L2SQR(addr1, addr2, dest, tmp1, tmp2) \
